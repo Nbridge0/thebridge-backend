@@ -1,0 +1,17 @@
+# Secrets
+.env
+env.txt
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
