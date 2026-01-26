@@ -3,7 +3,6 @@ import random
 import string
 import secrets
 import smtplib
-import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import make_msgid, formatdate
@@ -11,7 +10,6 @@ from email.utils import make_msgid, formatdate
 import openai
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
-
 # -------------------------------
 # ENV
 # -------------------------------
@@ -119,30 +117,33 @@ PARTNER_CACHE = load_partner_cache()
 # EMAIL (RESEND)
 # -------------------------------
 def send_email(to_email, subject, body):
-    if not isinstance(to_email, list):
-        to_email = [to_email]
+    msg = MIMEMultipart()
+    msg["From"] = f"TheBridge <{FROM_EMAIL}>"
 
-    # ✅ Prevent threading (same behavior as before)
+    if isinstance(to_email, list):
+        msg["To"] = ", ".join(to_email)
+        recipients = to_email
+    else:
+        msg["To"] = to_email
+        recipients = [to_email]
+
+    # ✅ UNIQUE SUBJECT SUFFIX (NO THREADING)
     unique_token = secrets.token_hex(3)
-    subject = f"{subject} #{unique_token}"
+    msg["Subject"] = f"{subject} #{unique_token}"
 
-    res = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {os.getenv('RESEND_API_KEY')}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "from": f"TheBridge <{FROM_EMAIL}>",
-            "to": to_email,
-            "subject": subject,
-            "text": body,
-        },
-        timeout=10,
-    )
+    msg["Message-ID"] = make_msgid()
+    msg["Date"] = formatdate(localtime=True)
 
-    if res.status_code >= 400:
-        raise Exception(f"Email send failed: {res.text}")
+    # ✅ HARD STOP THREADING
+    msg["In-Reply-To"] = ""
+    msg["References"] = ""
+
+    msg.attach(MIMEText(body, "plain"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
 
 # -------------------------------
 # OPENAI

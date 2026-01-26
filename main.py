@@ -6,12 +6,13 @@ from chat import get_answer, send_help_request, ask_ai_only, save_message
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
-import requests
 import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.utils import make_msgid, formatdate
 from datetime import datetime, timedelta, timezone
 from typing import List
-
-
 # -------------------------
 # ENV
 # -------------------------
@@ -138,34 +139,29 @@ TheBridge Team
 # -------------------------
 # EMAIL
 # -------------------------
-# -------------------------------
-# EMAIL (RESEND)
-# -------------------------------
 def send_email(to_email, subject, body):
-    if not isinstance(to_email, list):
-        to_email = [to_email]
+    msg = MIMEMultipart()
+    msg["From"] = f"TheBridge <{FROM_EMAIL}>"
 
-    # ✅ Prevent threading (same behavior as before)
-    unique_token = secrets.token_hex(3)
-    subject = f"{subject} #{unique_token}"
+    if isinstance(to_email, list):
+        msg["To"] = ", ".join(to_email)
+        recipients = to_email
+    else:
+        msg["To"] = to_email
+        recipients = [to_email]
 
-    res = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {os.getenv('RESEND_API_KEY')}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "from": f"TheBridge <{FROM_EMAIL}>",
-            "to": to_email,
-            "subject": subject,
-            "text": body,
-        },
-        timeout=10,
-    )
+    msg["Subject"] = subject
+    msg["Message-ID"] = make_msgid()
+    msg["Date"] = formatdate(localtime=True)
+    msg["Reply-To"] = FROM_EMAIL
 
-    if res.status_code >= 400:
-        raise Exception(f"Email send failed: {res.text}")
+    msg.attach(MIMEText(body, "plain"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
+
 
 
 
