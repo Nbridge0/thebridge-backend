@@ -1,7 +1,8 @@
 fastapi
 uvicorn
+python-dotenv
 supabase
 openai
-pydantic
 email-validator
+
 

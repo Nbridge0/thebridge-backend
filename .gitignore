@@ -1,16 +1,5 @@
-# Secrets
 .env
-env.txt
-*.env
-
-# Python
 __pycache__/
 *.pyc
-
-# Jupyter / junk
-*.ipynb
 .ipynb_checkpoints/
-
-# OS
-.DS_Store
 
