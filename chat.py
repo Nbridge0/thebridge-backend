@@ -141,10 +141,10 @@ def send_email(to_email, subject, body):
 
     msg.attach(MIMEText(body, "plain"))
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
         server.login(SMTP_USER, SMTP_PASS)
         server.sendmail(FROM_EMAIL, recipients, msg.as_string())
+
 
 # -------------------------------
 # OPENAI
