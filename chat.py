@@ -3,6 +3,7 @@ import random
 import string
 import secrets
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import make_msgid, formatdate
@@ -115,36 +116,33 @@ def load_partner_cache():
 PARTNER_CACHE = load_partner_cache()
 
 # -------------------------------
-# EMAIL
+# EMAIL (RESEND)
 # -------------------------------
 def send_email(to_email, subject, body):
-    msg = MIMEMultipart()
-    msg["From"] = f"TheBridge <{FROM_EMAIL}>"
+    if not isinstance(to_email, list):
+        to_email = [to_email]
 
-    if isinstance(to_email, list):
-        msg["To"] = ", ".join(to_email)
-        recipients = to_email
-    else:
-        msg["To"] = to_email
-        recipients = [to_email]
-
-    # ✅ UNIQUE SUBJECT SUFFIX (NO THREADING)
+    # ✅ Prevent threading (same behavior as before)
     unique_token = secrets.token_hex(3)
-    msg["Subject"] = f"{subject} #{unique_token}"
+    subject = f"{subject} #{unique_token}"
 
-    msg["Message-ID"] = make_msgid()
-    msg["Date"] = formatdate(localtime=True)
+    res = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {os.getenv('RESEND_API_KEY')}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": f"TheBridge <{FROM_EMAIL}>",
+            "to": to_email,
+            "subject": subject,
+            "text": body,
+        },
+        timeout=10,
+    )
 
-    # ✅ HARD STOP THREADING
-    msg["In-Reply-To"] = ""
-    msg["References"] = ""
-
-    msg.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
-
+    if res.status_code >= 400:
+        raise Exception(f"Email send failed: {res.text}")
 
 # -------------------------------
 # OPENAI
