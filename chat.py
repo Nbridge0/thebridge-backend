@@ -2,11 +2,7 @@ import os
 import random
 import string
 import secrets
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.utils import make_msgid, formatdate
-
+import requests
 import openai
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
@@ -20,10 +16,6 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-SMTP_HOST = os.getenv("SMTP_HOST")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 
 openai.api_key = OPENAI_API_KEY
@@ -117,35 +109,34 @@ PARTNER_CACHE = load_partner_cache()
 # EMAIL (RESEND)
 # -------------------------------
 def send_email(to_email, subject, body):
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = f"TheBridge <{FROM_EMAIL}>"
+    url = "https://api.brevo.com/v3/smtp/email"
 
-        if isinstance(to_email, list):
-            msg["To"] = ", ".join(to_email)
-            recipients = to_email
-        else:
-            msg["To"] = to_email
-            recipients = [to_email]
+    if isinstance(to_email, list):
+        to = [{"email": e} for e in to_email]
+    else:
+        to = [{"email": to_email}]
 
-        msg["Subject"] = subject
-        msg["Message-ID"] = make_msgid()
-        msg["Date"] = formatdate(localtime=True)
-        msg["Reply-To"] = FROM_EMAIL
+    payload = {
+        "sender": {
+            "name": "TheBridge",
+            "email": FROM_EMAIL
+        },
+        "to": to,
+        "subject": subject,
+        "textContent": body
+    }
 
-        msg.attach(MIMEText(body, "plain"))
+    headers = {
+        "accept": "application/json",
+        "api-key": os.getenv("BREVO_API_KEY"),
+        "content-type": "application/json"
+    }
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(FROM_EMAIL, recipients, msg.as_string())
+    response = requests.post(url, json=payload, headers=headers, timeout=10)
 
-    except Exception as e:
-        # 🔥 THIS IS WHAT YOU WERE MISSING
-        print("❌ EMAIL ERROR:", repr(e))
-        raise
+    if response.status_code >= 400:
+        print("❌ BREVO API ERROR:", response.status_code, response.text)
+        raise Exception("Email send failed")
 
 # -------------------------------
 # OPENAI
