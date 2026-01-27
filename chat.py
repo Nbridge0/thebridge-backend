@@ -117,33 +117,35 @@ PARTNER_CACHE = load_partner_cache()
 # EMAIL (RESEND)
 # -------------------------------
 def send_email(to_email, subject, body):
-    msg = MIMEMultipart()
-    msg["From"] = f"TheBridge <{FROM_EMAIL}>"
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = f"TheBridge <{FROM_EMAIL}>"
 
-    if isinstance(to_email, list):
-        msg["To"] = ", ".join(to_email)
-        recipients = to_email
-    else:
-        msg["To"] = to_email
-        recipients = [to_email]
+        if isinstance(to_email, list):
+            msg["To"] = ", ".join(to_email)
+            recipients = to_email
+        else:
+            msg["To"] = to_email
+            recipients = [to_email]
 
-    # ✅ UNIQUE SUBJECT SUFFIX (NO THREADING)
-    unique_token = secrets.token_hex(3)
-    msg["Subject"] = f"{subject} #{unique_token}"
+        msg["Subject"] = subject
+        msg["Message-ID"] = make_msgid()
+        msg["Date"] = formatdate(localtime=True)
+        msg["Reply-To"] = FROM_EMAIL
 
-    msg["Message-ID"] = make_msgid()
-    msg["Date"] = formatdate(localtime=True)
+        msg.attach(MIMEText(body, "plain"))
 
-    # ✅ HARD STOP THREADING
-    msg["In-Reply-To"] = ""
-    msg["References"] = ""
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(FROM_EMAIL, recipients, msg.as_string())
 
-    msg.attach(MIMEText(body, "plain"))
-
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(FROM_EMAIL, recipients, msg.as_string())
+    except Exception as e:
+        # 🔥 THIS IS WHAT YOU WERE MISSING
+        print("❌ EMAIL ERROR:", repr(e))
+        raise
 
 # -------------------------------
 # OPENAI
