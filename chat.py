@@ -111,19 +111,20 @@ PARTNER_CACHE = load_partner_cache()
 def send_email(to_email, subject, body):
     url = "https://api.brevo.com/v3/smtp/email"
 
-    if isinstance(to_email, list):
-        to = [{"email": e} for e in to_email]
-    else:
-        to = [{"email": to_email}]
+    ref = secrets.token_hex(6)  # 🔥 unique per email
 
     payload = {
         "sender": {
             "name": "TheBridge",
             "email": FROM_EMAIL
         },
-        "to": to,
-        "subject": subject,
-        "textContent": body
+        "to": [{"email": to_email}],
+        "subject": f"{subject} [Ref {ref}]",  # 🔥 unique subject
+        "textContent": f"{body}\n\nReference ID: {ref}",  # 🔥 unique body
+        "headers": {
+            "X-Entity-Ref-ID": ref,
+            "Message-ID": f"<{ref}@askthebridge.com>"
+        }
     }
 
     headers = {
@@ -137,6 +138,7 @@ def send_email(to_email, subject, body):
     if response.status_code >= 400:
         print("❌ BREVO API ERROR:", response.status_code, response.text)
         raise Exception("Email send failed")
+
 
 # -------------------------------
 # OPENAI
