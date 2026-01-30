@@ -108,10 +108,10 @@ PARTNER_CACHE = load_partner_cache()
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
-def send_email(to_email, subject, body):
+def send_email(to_email, cc_email, subject, body):
     url = "https://api.brevo.com/v3/smtp/email"
 
-    ref = secrets.token_hex(6)  # 🔥 unique per email
+    ref = secrets.token_hex(6)  # unique per email
 
     payload = {
         "sender": {
@@ -119,8 +119,9 @@ def send_email(to_email, subject, body):
             "email": FROM_EMAIL
         },
         "to": [{"email": to_email}],
-        "subject": f"{subject} [Ref {ref}]",  # 🔥 unique subject
-        "textContent": f"{body}\n\nReference ID: {ref}",  # 🔥 unique body
+        "cc": [{"email": cc_email}],  # 🔥 user copied here
+        "subject": f"{subject} [Ref {ref}]",
+        "textContent": f"{body}\n\nReference ID: {ref}",
         "headers": {
             "X-Entity-Ref-ID": ref,
             "Message-ID": f"<{ref}@askthebridge.com>"
@@ -246,18 +247,14 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
         question=question
     )
 
-    # ✅ Email to expert (single recipient → no thread)
+    # ✅ ONE email per expert
+    # ✅ User CC'd
+    # ✅ No threading
     send_email(
-        expert.data["email"],
-        HELP_EMAIL_SUBJECT,
-        body
-    )
-
-    # ✅ Separate email to user (also single recipient → no thread)
-    send_email(
-        user_email,
-        HELP_EMAIL_SUBJECT,
-        body
+        to_email=expert.data["email"],
+        cc_email=user_email,
+        subject=HELP_EMAIL_SUBJECT,
+        body=body
     )
 
     return {"status": "email_sent"}
