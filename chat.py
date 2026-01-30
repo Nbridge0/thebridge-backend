@@ -244,11 +244,18 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
         question=question
     )
 
+    # ✅ Email to expert (single recipient → no thread)
     send_email(
-        [expert.data["email"], user_email],
+        expert.data["email"],
+        HELP_EMAIL_SUBJECT,
+        body
+    )
+
+    # ✅ Separate email to user (also single recipient → no thread)
+    send_email(
+        user_email,
         HELP_EMAIL_SUBJECT,
         body
     )
 
     return {"status": "email_sent"}
-
