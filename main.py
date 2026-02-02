@@ -2,13 +2,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request
+from chat import get_answer, send_help_request, ask_ai_only, save_message
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
 import secrets
 import requests
 from datetime import datetime, timedelta, timezone
+from typing import List
 # -------------------------
 # ENV
 # -------------------------
@@ -22,11 +23,6 @@ supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 FROM_EMAIL = os.getenv("FROM_EMAIL")
-
-print("SUPABASE_URL:", bool(SUPABASE_URL))
-print("SUPABASE_ANON_KEY:", bool(SUPABASE_ANON_KEY))
-print("SUPABASE_SERVICE_ROLE_KEY:", bool(SUPABASE_SERVICE_ROLE_KEY))
-
 
 
 def get_user_name_by_email(email: str) -> str:
@@ -194,9 +190,10 @@ def list_experts(role: str):
 # MODELS
 # -------------------------
 class ChatRequest(BaseModel):
+    chat_id: Optional[int] = None
     message: str
     user_role: str = "guest"
-    user_email: EmailStr
+    user_email: Optional[str] = None
 
 
 class SignupRequest(BaseModel):
@@ -272,6 +269,36 @@ def health():
     return {"status": "ok"}
 
 
+# -------------------------
+# CHAT
+# -------------------------
+@app.post("/chat/message")
+def chat_message(req: ChatRequest):
+    result = get_answer(req.message, req.user_role)
+
+    if req.chat_id:
+        save_message(req.chat_id, "user", req.message, "user")
+        save_message(req.chat_id, "assistant", result["answer"], result["source"])
+
+    return result
+
+
+@app.post("/chat/ask-ai")
+def chat_ask_ai(req: ChatRequest):
+    answer = ask_ai_only(req.message)
+
+    if req.chat_id:
+        save_message(
+            req.chat_id,
+            "assistant",
+            answer,
+            "openai_only"
+        )
+
+    return {
+        "answer": answer,
+        "source": "openai_only",
+    }
 
 
 
@@ -485,61 +512,58 @@ def reset_confirm(req: ResetConfirmRequest):
 # -------------------------
 # CHATS
 # -------------------------
-
-@app.post("/chats/{chat_title}/message")
-def send_message(chat_title: str, req: ChatRequest):
-
-    # save user message
-    supabase_admin.table("chat_messages").insert({
-        "user_email": req.user_email,
-        "chat_title": chat_title,
-        "role": "user",
-        "content": req.message,
-        "source": "user"
-    }).execute()
-
-    result = get_answer(req.message, req.user_role)
-
-    # save assistant message
-    supabase_admin.table("chat_messages").insert({
-        "user_email": req.user_email,
-        "chat_title": chat_title,
-        "role": "assistant",
-        "content": result["answer"],
-        "source": result["source"]
-    }).execute()
-
-    return result
-
+@app.get("/chats")
+def list_chats(user_email: EmailStr):
+    resp = supabase_admin.table("user_chats") \
+        .select("*") \
+        .eq("user_email", user_email) \
+        .execute()
+    return resp.data 
 
 
 @app.post("/chats")
 def create_chat(req: CreateChatRequest):
-    supabase_admin.table("user_chats").insert({
+    resp = supabase_admin.table("user_chats").insert({
         "user_email": req.user_email,
-        "title": req.title
+        "chat_title": req.title,
     }).execute()
 
-    return {"status": "created"}
+    return {
+        "status": "created",
+        "chat_id": resp.data[0]["id"]
+    }
 
-@app.get("/chats")
-def list_chats(user_email: EmailStr):
-    resp = supabase_admin.table("user_chats") \
-        .select("title, created_at") \
-        .eq("user_email", user_email) \
-        .order("created_at", desc=True) \
+
+
+@app.post("/chats/{chat_id}/messages")
+def save_chat_messages(chat_id: int, messages: list):
+    supabase.table("user_chats") \
+        .update({"messages": messages}) \
+        .eq("id", chat_id) \
         .execute()
+    return {"status": "saved"}
 
-    return resp.data
-
-@app.get("/chats/{chat_title}/messages")
-def get_chat_messages(chat_title: str, user_email: EmailStr):
+@app.get("/chats/{chat_id}/messages")
+def get_chat_messages(chat_id: int):
     resp = supabase_admin.table("chat_messages") \
-        .select("role, content, source, created_at") \
-        .eq("user_email", user_email) \
-        .eq("chat_title", chat_title) \
-        .order("created_at") \
+        .select("*") \
+        .eq("chat_id", chat_id) \
+        .order("id") \
         .execute()
 
     return resp.data
 
+
+# -------------------------
+# GUEST → USER
+# -------------------------
+@app.post("/guest/attach")
+def attach_guest(user_email: EmailStr, guest_chats: list):
+    for chat in guest_chats:
+        supabase.table("user_chats").insert({
+            "user_email": user_email,
+            "chat_title": chat["title"],
+            "messages": chat["messages"]
+        }).execute()
+
+    return {"status": "attached"}
