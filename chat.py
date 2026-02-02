@@ -6,6 +6,9 @@ import requests
 import openai
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
+from openai import OpenAI
+
+
 # -------------------------------
 # ENV
 # -------------------------------
@@ -19,6 +22,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 
 openai.api_key = OPENAI_API_KEY
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -------------------------------
 # CLIENTS
@@ -90,6 +95,27 @@ def normalize(text: str) -> str:
     return text.strip().lower().translate(
         str.maketrans("", "", string.punctuation)
     )
+
+def semantic_partner_match(question: str):
+    embedding = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=question
+    ).data[0].embedding
+
+    resp = supabase_admin.rpc(
+        "match_partner_qa",
+        {
+            "query_embedding": embedding,
+            "match_threshold": 0.80,
+            "match_count": 1
+        }
+    ).execute()
+
+    if resp.data:
+        return resp.data[0]
+
+    return None
+
 
 # -------------------------------
 # PARTNER CACHE
@@ -181,17 +207,28 @@ def ask_ai_only(question: str) -> str:
 def get_answer(message: str, user_role: str = "guest"):
     user_norm = normalize(message)
 
-    # 1️⃣ EXACT DB MATCH
+    # 1️⃣ EXACT MATCH (fast, cheap)
     for row in PARTNER_CACHE:
         if normalize(row["question"]) == user_norm:
             return {
                 "answer": row["answer"],
-                "source": "db",
+                "source": "db_exact",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
             }
 
-    # 2️⃣ YACHTING KEYWORDS
+    # 2️⃣ SEMANTIC MATCH (embeddings)
+    semantic = semantic_partner_match(message)
+    if semantic:
+        return {
+            "answer": semantic["answer"],
+            "source": "db_semantic",
+            "similarity": round(semantic["similarity"], 3),
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
+        }
+
+    # 3️⃣ YACHTING FALLBACK
     yachting_keywords = [
         "yacht", "crew", "captain", "flag", "port state", "psc",
         "manning", "inspection", "maritime", "ism", "isps",
@@ -199,10 +236,7 @@ def get_answer(message: str, user_role: str = "guest"):
         "minimum crew", "safe manning"
     ]
 
-    is_yachting = any(k in user_norm for k in yachting_keywords)
-
-    # 3️⃣ YACHTING BUT NO ANSWER
-    if is_yachting:
+    if any(k in user_norm for k in yachting_keywords):
         return {
             "answer": NO_ANSWER_FALLBACK,
             "source": "no_answer",
@@ -210,7 +244,7 @@ def get_answer(message: str, user_role: str = "guest"):
             "requires_auth": user_role == "guest",
         }
 
-    # 4️⃣ GENERAL → OPENAI
+    # 4️⃣ GENERAL AI
     return {
         "answer": ask_openai(message),
         "source": "openai_general",
