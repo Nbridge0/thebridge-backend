@@ -108,18 +108,21 @@ PARTNER_CACHE = load_partner_cache()
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
-def send_email(to_email, cc_email, subject, body):
+def send_email(to_emails, subject, body):
     url = "https://api.brevo.com/v3/smtp/email"
 
-    ref = secrets.token_hex(6)  # unique per email
+    # force list
+    if not isinstance(to_emails, list):
+        to_emails = [to_emails]
+
+    ref = secrets.token_hex(6)  # unique per email (prevents threading)
 
     payload = {
         "sender": {
             "name": "TheBridge",
             "email": FROM_EMAIL
         },
-        "to": [{"email": to_email}],
-        "cc": [{"email": cc_email}],  # 🔥 user copied here
+        "to": [{"email": e} for e in to_emails],  # ✅ ALL IN TO
         "subject": f"{subject} [Ref {ref}]",
         "textContent": f"{body}\n\nReference ID: {ref}",
         "headers": {
@@ -247,14 +250,12 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
         question=question
     )
 
-    # ✅ ONE email per expert
-    # ✅ User CC'd
-    # ✅ No threading
+
     send_email(
-        to_email=expert.data["email"],
-        cc_email=user_email,
+        to_emails=[expert.data["email"], user_email],  # ✅ BOTH IN TO
         subject=HELP_EMAIL_SUBJECT,
         body=body
     )
+
 
     return {"status": "email_sent"}
