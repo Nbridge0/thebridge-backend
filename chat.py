@@ -106,7 +106,7 @@ def semantic_partner_match(question: str):
         "match_partner_qa",
         {
             "query_embedding": embedding,
-            "match_threshold": 0.80,
+            "match_threshold": 0.72,
             "match_count": 1
         }
     ).execute()
