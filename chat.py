@@ -108,23 +108,38 @@ PARTNER_CACHE = load_partner_cache()
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
+# -------------------------------
+# EMAIL (BREVO / REPLY-ALL SAFE)
+# -------------------------------
 def send_email(to_emails, subject, body):
     url = "https://api.brevo.com/v3/smtp/email"
 
-    # force list
+    # ✅ Force list
     if not isinstance(to_emails, list):
         to_emails = [to_emails]
 
-    ref = secrets.token_hex(6)  # unique per email (prevents threading)
+    # 🔑 Unique reference (prevents threading issues)
+    ref = secrets.token_hex(6)
 
     payload = {
         "sender": {
             "name": "TheBridge",
             "email": FROM_EMAIL
         },
-        "to": [{"email": e} for e in to_emails],  # ✅ ALL IN TO
+
+        # ✅ EVERYONE IN TO (NO CC)
+        "to": [{"email": e} for e in to_emails],
+
+        # 🔥 FORCE REPLY-ALL TO KEEP EVERYONE IN TO
+        "replyTo": {
+            "email": ",".join(to_emails)
+        },
+
         "subject": f"{subject} [Ref {ref}]",
+
         "textContent": f"{body}\n\nReference ID: {ref}",
+
+        # 🔒 Email headers for consistent reply behavior
         "headers": {
             "X-Entity-Ref-ID": ref,
             "Message-ID": f"<{ref}@askthebridge.com>"
@@ -137,7 +152,12 @@ def send_email(to_emails, subject, body):
         "content-type": "application/json"
     }
 
-    response = requests.post(url, json=payload, headers=headers, timeout=10)
+    response = requests.post(
+        url,
+        json=payload,
+        headers=headers,
+        timeout=10
+    )
 
     if response.status_code >= 400:
         print("❌ BREVO API ERROR:", response.status_code, response.text)
