@@ -23,6 +23,11 @@ supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 
+print("SUPABASE_URL:", bool(SUPABASE_URL))
+print("SUPABASE_ANON_KEY:", bool(SUPABASE_ANON_KEY))
+print("SUPABASE_SERVICE_ROLE_KEY:", bool(SUPABASE_SERVICE_ROLE_KEY))
+
+
 
 def get_user_name_by_email(email: str) -> str:
     try:
