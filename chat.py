@@ -253,9 +253,10 @@ def get_answer(message: str, user_role: str = "guest"):
     }
 
 
-def save_message(chat_id, role, content, source):
+def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
         "chat_id": chat_id,
+        "user_email": user_email,
         "role": role,
         "content": content,
         "source": source

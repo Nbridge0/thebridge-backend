@@ -277,8 +277,8 @@ def chat_message(req: ChatRequest):
     result = get_answer(req.message, req.user_role)
 
     if req.chat_id:
-        save_message(req.chat_id, "user", req.message, "user")
-        save_message(req.chat_id, "assistant", result["answer"], result["source"])
+        save_message(req.chat_id, "user", req.message, "user", req.user_email)
+        save_message(req.chat_id, "assistant", result["answer"], result["source"], req.user_email)
 
     return result
 
@@ -287,21 +287,21 @@ def chat_message(req: ChatRequest):
 def chat_ask_ai(req: ChatRequest):
     answer = ask_ai_only(req.message)
 
+
     if req.chat_id:
         save_message(
             req.chat_id,
             "assistant",
             answer,
-            "openai_only"
+            "openai_only",
+            req.user_email
         )
+
 
     return {
         "answer": answer,
         "source": "openai_only",
     }
-
-
-
 
 
 # -------------------------
