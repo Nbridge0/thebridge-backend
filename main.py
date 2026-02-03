@@ -556,7 +556,6 @@ async def create_chat(payload: CreateChatRequest):
             "user_email": payload.user_email,
             "title": payload.title
         }) \
-        .select("id") \
         .execute()
 
     return {"chat_id": res.data[0]["id"]}
