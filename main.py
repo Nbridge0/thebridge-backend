@@ -275,7 +275,7 @@ def health():
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
-    # ✅ SAVE USER MESSAGE FIRST (ALWAYS)
+    # ✅ save user message
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -285,17 +285,23 @@ def chat_message(req: ChatRequest):
             req.user_email
         )
 
-    # ⚠️ AI can fail / hang — wrap it
     try:
         result = get_answer(req.message, req.user_role)
-        answer = result["answer"]
-        source = result["source"]
     except Exception as e:
-        answer = "⚠️ The assistant is temporarily unavailable. Please try again."
-        source = "error"
         print("AI ERROR:", e)
+        return {
+            "answer": "⚠️ Temporary error. Please try again.",
+            "source": "error",
+            "actions": ["ask_ai"],
+            "requires_auth": False
+        }
 
-    # ✅ SAVE BOT MESSAGE EVEN IF FALLBACK
+    answer = result.get("answer")
+    source = result.get("source")
+    actions = result.get("actions", [])
+    requires_auth = result.get("requires_auth", False)
+
+    # ✅ save bot message
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -307,8 +313,11 @@ def chat_message(req: ChatRequest):
 
     return {
         "answer": answer,
-        "source": source
+        "source": source,
+        "actions": actions,
+        "requires_auth": requires_auth
     }
+
 
 
 @app.post("/chat/ask-ai")
