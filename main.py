@@ -550,24 +550,32 @@ def list_chats(user_email: EmailStr):
 
 
 @app.post("/chats")
-async def create_chat(payload: CreateChatRequest):
-    res = supabase_admin.table("user_chats") \
+def create_chat(payload: dict):
+    user_email = payload.get("user_email")
+    title = payload.get("title", "New Chat")
+
+    if not user_email:
+        raise HTTPException(status_code=400, detail="user_email required")
+
+    result = (
+        supabase_admin
+        .table("user_chats")
         .insert({
-            "user_email": payload.user_email,
-            "title": payload.title
-        }) \
+            "user_email": user_email,
+            "title": title
+        })
         .execute()
+    )
 
-    return {"chat_id": res.data[0]["id"]}
+    if not result.data or len(result.data) == 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create chat"
+        )
 
-
-@app.post("/chats/{chat_id}/messages")
-def save_chat_messages(chat_id: int, messages: list):
-    supabase_admin.table("user_chats") \
-        .update({"messages": messages}) \
-        .eq("id", chat_id) \
-        .execute()
-    return {"status": "saved"}
+    return {
+        "chat_id": result.data[0]["id"]
+    }
 
 
 @app.get("/chats/{chat_id}/messages")
@@ -581,16 +589,3 @@ def get_chat_messages(chat_id: int):
     return resp.data
 
 
-# -------------------------
-# GUEST → USER
-# -------------------------
-@app.post("/guest/attach")
-def attach_guest(user_email: EmailStr, guest_chats: list):
-    for chat in guest_chats:
-        supabase_admin.table("user_chats").insert({
-            "user_email": user_email,
-            "title": chat["title"],
-            "messages": chat["messages"]
-        }).execute()
-
-    return {"status": "attached"}
