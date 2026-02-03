@@ -522,16 +522,16 @@ def list_chats(user_email: EmailStr):
 
 
 @app.post("/chats")
-def create_chat(req: CreateChatRequest):
-    resp = supabase_admin.table("user_chats").insert({
-        "user_email": req.user_email,
-        "chat_title": req.title,
+async def create_chat(payload: CreateChatRequest):
+    user_email = payload.user_email
+    title = payload.title
+
+    res = supabase.table("user_chats").insert({
+        "user_email": user_email,
+        "title": title
     }).execute()
 
-    return {
-        "status": "created",
-        "chat_id": resp.data[0]["id"]
-    }
+    return {"chat_id": res.data[0]["id"]}
 
 
 
@@ -562,7 +562,7 @@ def attach_guest(user_email: EmailStr, guest_chats: list):
     for chat in guest_chats:
         supabase.table("user_chats").insert({
             "user_email": user_email,
-            "chat_title": chat["title"],
+            "title": chat["title"],
             "messages": chat["messages"]
         }).execute()
 
