@@ -274,13 +274,41 @@ def health():
 # -------------------------
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
-    result = get_answer(req.message, req.user_role)
 
+    # ✅ SAVE USER MESSAGE FIRST (ALWAYS)
     if req.chat_id:
-        save_message(req.chat_id, "user", req.message, "user", req.user_email)
-        save_message(req.chat_id, "assistant", result["answer"], result["source"], req.user_email)
+        save_message(
+            req.chat_id,
+            "user",
+            req.message,
+            "user",
+            req.user_email
+        )
 
-    return result
+    # ⚠️ AI can fail / hang — wrap it
+    try:
+        result = get_answer(req.message, req.user_role)
+        answer = result["answer"]
+        source = result["source"]
+    except Exception as e:
+        answer = "⚠️ The assistant is temporarily unavailable. Please try again."
+        source = "error"
+        print("AI ERROR:", e)
+
+    # ✅ SAVE BOT MESSAGE EVEN IF FALLBACK
+    if req.chat_id:
+        save_message(
+            req.chat_id,
+            "assistant",
+            answer,
+            source,
+            req.user_email
+        )
+
+    return {
+        "answer": answer,
+        "source": source
+    }
 
 
 @app.post("/chat/ask-ai")
@@ -523,13 +551,15 @@ def list_chats(user_email: EmailStr):
 
 @app.post("/chats")
 async def create_chat(payload: CreateChatRequest):
-    res = supabase_admin.table("user_chats").insert({
-        "user_email": payload.user_email,
-        "title": payload.title
-    }).execute()
+    res = supabase_admin.table("user_chats") \
+        .insert({
+            "user_email": payload.user_email,
+            "title": payload.title
+        }) \
+        .select("id") \
+        .execute()
 
     return {"chat_id": res.data[0]["id"]}
-
 
 
 @app.post("/chats/{chat_id}/messages")
