@@ -385,8 +385,7 @@ def verify(req: VerifyRequest):
 
     record = resp.data[0]
 
-    expires_at = datetime.fromisoformat(record["expires_at"])
-    if expires_at < datetime.now(timezone.utc):
+    if datetime.fromisoformat(record["expires_at"]) < datetime.now(timezone.utc):
         raise HTTPException(400, "Verification code expired")
 
     if code != record["code"]:
@@ -398,33 +397,23 @@ def verify(req: VerifyRequest):
         .eq("email", email) \
         .execute()
 
-    user = get_user_by_email(email)
+    # 🔥 CREATE USER THE *ONLY* CORRECT WAY
+    auth = supabase.auth.sign_up({
+        "email": email,
+        "password": record["password"]
+    })
 
-    if user:
-        # existing user → ensure confirmed + password
-        supabase_admin.auth.admin.update_user_by_id(
-            user.id,
-            {
-                "email_confirmed_at": datetime.now(timezone.utc).isoformat(),
-                "password": record["password"]
-            }
-        )
-        user_id = user.id
-    else:
-        # NEW USER — MUST BE TWO STEPS
-        user = supabase_admin.auth.admin.create_user({
-            "email": email,
+    user_id = auth.user.id
+
+    # 🔥 MANUALLY CONFIRM EMAIL
+    supabase_admin.auth.admin.update_user_by_id(
+        user_id,
+        {
             "email_confirmed_at": datetime.now(timezone.utc).isoformat()
-        })
-        user_id = user.user.id
+        }
+    )
 
-        supabase_admin.auth.admin.update_user_by_id(
-            user_id,
-            {
-                "password": record["password"]
-            }
-        )
-
+    # profile
     supabase_admin.table("user_profiles").upsert({
         "id": user_id,
         "email": email,
