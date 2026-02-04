@@ -340,10 +340,10 @@ def chat_ask_ai(req: ChatRequest):
         "source": "openai_only",
     }
 
-
 # -------------------------
 # AUTH
 # -------------------------
+
 @app.post("/auth/signup")
 def signup(req: SignupRequest):
     email = req.email.lower().strip()
@@ -359,16 +359,16 @@ def signup(req: SignupRequest):
     }).execute()
 
     send_email(
-         email,
-         VERIFICATION_EMAIL_SUBJECT,
-         VERIFICATION_EMAIL_BODY.format(
-             name=req.name,
-             code=code
+        email,
+        VERIFICATION_EMAIL_SUBJECT,
+        VERIFICATION_EMAIL_BODY.format(
+            name=req.name,
+            code=code
         )
     )
 
-
     return {"status": "verification_sent"}
+
 
 @app.post("/auth/verify")
 def verify(req: VerifyRequest):
@@ -397,21 +397,13 @@ def verify(req: VerifyRequest):
         .eq("email", email) \
         .execute()
 
-    # 🔥 CREATE USER THE *ONLY* CORRECT WAY
+    # ✅ CREATE USER (Confirm email is OFF in Supabase)
     auth = supabase.auth.sign_up({
         "email": email,
         "password": record["password"]
     })
 
     user_id = auth.user.id
-
-    # 🔥 MANUALLY CONFIRM EMAIL
-    supabase_admin.auth.admin.update_user_by_id(
-        user_id,
-        {
-            "email_confirmed_at": datetime.now(timezone.utc).isoformat()
-        }
-    )
 
     # profile
     supabase_admin.table("user_profiles").upsert({
@@ -591,5 +583,3 @@ def get_chat_messages(chat_id: int):
         .execute()
 
     return resp.data
-
-
