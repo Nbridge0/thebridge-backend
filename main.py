@@ -402,19 +402,20 @@ def verify(req: VerifyRequest):
     user = get_user_by_email(email)
 
     if user:
-        # ❌ DO NOT TOUCH PASSWORD
+        # ✅ FIX: correctly mark email as confirmed
         supabase_admin.auth.admin.update_user_by_id(
             user.id,
             {
-                "email_confirm": True
+                "email_confirmed_at": datetime.now(timezone.utc).isoformat()
             }
         )
         user_id = user.id
     else:
+        # ✅ FIX: correctly mark email as confirmed on creation
         user = supabase_admin.auth.admin.create_user({
             "email": email,
             "password": record["password"],
-            "email_confirm": True
+            "email_confirmed_at": datetime.now(timezone.utc).isoformat()
         })
         user_id = user.user.id
 
