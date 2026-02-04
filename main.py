@@ -392,41 +392,45 @@ def verify(req: VerifyRequest):
     if code != record["code"]:
         raise HTTPException(400, "Invalid verification code")
 
-    # ✅ delete verification record FIRST
+    # delete verification record
     supabase_admin.table("email_verifications") \
         .delete() \
         .eq("email", email) \
         .execute()
 
-    # ✅ create or update user — PASSWORD WRITTEN ONLY ON CREATE
     user = get_user_by_email(email)
 
     if user:
-        # ✅ FIX: correctly mark email as confirmed
+        # existing user → ensure confirmed + password
         supabase_admin.auth.admin.update_user_by_id(
             user.id,
             {
-                "email_confirmed_at": datetime.now(timezone.utc).isoformat()
+                "email_confirmed_at": datetime.now(timezone.utc).isoformat(),
+                "password": record["password"]
             }
         )
         user_id = user.id
     else:
-        # ✅ FIX: correctly mark email as confirmed on creation
+        # NEW USER — MUST BE TWO STEPS
         user = supabase_admin.auth.admin.create_user({
             "email": email,
-            "password": record["password"],
             "email_confirmed_at": datetime.now(timezone.utc).isoformat()
         })
         user_id = user.user.id
 
-    # ✅ upsert profile
+        supabase_admin.auth.admin.update_user_by_id(
+            user_id,
+            {
+                "password": record["password"]
+            }
+        )
+
     supabase_admin.table("user_profiles").upsert({
         "id": user_id,
         "email": email,
         "name": record["name"]
     }).execute()
 
-    # ✅ SEND WELCOME EMAIL (EXACT CONTENT)
     send_email(
         email,
         WELCOME_EMAIL_SUBJECT,
@@ -434,6 +438,7 @@ def verify(req: VerifyRequest):
     )
 
     return {"status": "verified"}
+
 
 @app.post("/auth/login")
 def login(req: LoginRequest):
