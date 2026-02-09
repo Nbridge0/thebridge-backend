@@ -7,6 +7,7 @@ import openai
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
+from typing import Optional
 
 
 # -------------------------------
@@ -261,6 +262,30 @@ def save_message(chat_id, role, content, source, user_email=None):
         "content": content,
         "source": source
     }).execute()
+
+
+def track_click(
+    chat_id: Optional[int],
+    button: str,
+    question: str,
+    user_email: str = None,
+    user_role: str = "guest"
+):
+
+    """
+    Stores button click analytics in user_clicks table
+    """
+    try:
+        supabase_admin.table("user_clicks").insert({
+            "chat_id": chat_id,
+            "user_email": user_email,
+            "user_type": "user" if user_role != "guest" else "guest",
+            "button": button,
+            "question": question
+        }).execute()
+    except Exception as e:
+        print("❌ CLICK TRACK ERROR:", e)
+
 
 
 # -------------------------------

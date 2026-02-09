@@ -2,14 +2,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request, ask_ai_only, save_message
+from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
 import secrets
 import requests
 from datetime import datetime, timedelta, timezone
-from typing import List
 # -------------------------
 # ENV
 # -------------------------
@@ -233,11 +232,24 @@ class HelpRequest(BaseModel):
     message: str
     user_email: EmailStr
     expert_emails: List[EmailStr]
-    role: str
+    role: str                     # 'specialist' or 'ambassador'
+    chat_id: Optional[int] = None
+    user_role: str = "guest"
+
 
 
 @app.post("/help/send")
 def help_send(req: HelpRequest):
+
+    # ✅ TRACK BUTTON CLICK
+    track_click(
+        chat_id=req.chat_id,
+        button="ask_specialist" if req.role == "specialist" else "ask_ambassador",
+        question=req.message,
+        user_email=req.user_email,
+        user_role=req.user_role
+    )
+
 
     # 🔒 Re-fetch valid experts by role
     valid_experts = supabase_admin.table("experts") \
@@ -322,9 +334,20 @@ def chat_message(req: ChatRequest):
 
 @app.post("/chat/ask-ai")
 def chat_ask_ai(req: ChatRequest):
+
+    # ✅ TRACK BUTTON CLICK (ALWAYS, even if guest / no chat yet)
+    track_click(
+        chat_id=req.chat_id,
+        button="ask_ai",
+        question=req.message,
+        user_email=req.user_email,
+        user_role=req.user_role
+    )
+
+    # 🤖 Generate AI answer
     answer = ask_ai_only(req.message)
 
-
+    # 💾 Save AI response in chat history (only if chat exists)
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -333,7 +356,6 @@ def chat_ask_ai(req: ChatRequest):
             "openai_only",
             req.user_email
         )
-
 
     return {
         "answer": answer,
