@@ -271,18 +271,19 @@ def track_click(
     user_email: str = None,
     user_role: str = "guest"
 ):
-    resp = supabase_admin.table("user_clicks").insert({
-        "chat_id": chat_id,
-        "user_email": user_email,
-        "user_type": "user" if user_role != "guest" else "guest",
-        "button": button,
-        "question": question
-    }).execute()
+    try:
+        resp = supabase_admin.table("user_clicks").insert({
+            "chat_id": chat_id,
+            "user_email": user_email,
+            "user_type": "user" if user_role != "guest" else "guest",
+            "button": button,
+            "question": question
+        }).execute()
 
-    if resp.error:
-        print("❌ CLICK TRACK ERROR:", resp.error)
-    else:
         print("✅ CLICK TRACKED:", resp.data)
+
+    except Exception as e:
+        print("❌ CLICK TRACK FAILED:", str(e))
 
 
 
