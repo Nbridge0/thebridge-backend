@@ -617,5 +617,4 @@ def get_chat_messages(chat_id: int):
         .eq("chat_id", chat_id) \
         .order("id") \
         .execute()
-
     return resp.data
