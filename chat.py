@@ -201,6 +201,32 @@ def ask_ai_only(question: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
+# -------------------------------
+# CHAT TITLE GENERATOR
+# -------------------------------
+def generate_chat_title(first_message: str) -> str:
+    """
+    Generates a short topic-style chat title from first user message
+    """
+    try:
+        r = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Create a very short conversation title (max 6 words). No punctuation."
+                },
+                {"role": "user", "content": first_message},
+            ],
+            temperature=0.2,
+            max_tokens=20,
+        )
+        return r.choices[0].message.content.strip()
+    except Exception as e:
+        print("TITLE GEN ERROR:", e)
+        return "New Chat"
+
+
 
 # -------------------------------
 # CORE CHAT LOGIC
