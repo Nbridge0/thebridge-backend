@@ -2,7 +2,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click, generate_chat_title
+from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -285,14 +285,9 @@ def health():
 # CHAT
 # -------------------------
 @app.post("/chat/message")
-async def chat_message(req: ChatMessageRequest):
-    """
-    Receives a user message, saves it, gets AI response,
-    and generates chat title if first message in chat
-    """
-    # -------------------------------
-    # Save user message
-    # -------------------------------
+def chat_message(req: ChatRequest):
+
+    # ✅ save user message
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -302,46 +297,37 @@ async def chat_message(req: ChatMessageRequest):
             req.user_email
         )
 
-    # -------------------------------
-    # Generate chat title if first user message
-    # -------------------------------
-    new_title = None
+    try:
+        result = get_answer(req.message, req.user_role)
+    except Exception as e:
+        print("AI ERROR:", e)
+        return {
+            "answer": "⚠️ Temporary error. Please try again.",
+            "source": "error",
+            "actions": ["ask_ai"],
+            "requires_auth": False
+        }
+
+    answer = result.get("answer")
+    source = result.get("source")
+    actions = result.get("actions", [])
+    requires_auth = result.get("requires_auth", False)
+
+    # ✅ save bot message
     if req.chat_id:
-        count_resp = supabase_admin.table("chat_messages") \
-            .select("id", count="exact") \
-            .eq("chat_id", req.chat_id) \
-            .eq("role", "user") \
-            .execute()
+        save_message(
+            req.chat_id,
+            "assistant",
+            answer,
+            source,
+            req.user_email
+        )
 
-        user_msg_count = count_resp.count or 0
-
-        if user_msg_count == 1:
-            # First message → generate title
-            new_title = generate_chat_title(req.message)
-
-            supabase_admin.table("user_chats") \
-                .update({"title": new_title}) \
-                .eq("id", req.chat_id) \
-                .execute()
-
-    # -------------------------------
-    # Get AI answer
-    # -------------------------------
-    answer, source, actions, requires_auth = get_answer(
-        req.message,
-        req.chat_id,
-        req.user_email
-    )
-
-    # -------------------------------
-    # Return response including new title
-    # -------------------------------
     return {
         "answer": answer,
         "source": source,
         "actions": actions,
-        "requires_auth": requires_auth,
-        "new_title": new_title  # 🔥 frontend can update sidebar
+        "requires_auth": requires_auth
     }
 
 
@@ -632,4 +618,4 @@ def get_chat_messages(chat_id: int):
         .order("id") \
         .execute()
 
-    return resp.data
+    return resp.data 
