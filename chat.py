@@ -271,19 +271,20 @@ def track_click(
     user_email: str = None,
     user_role: str = "guest"
 ):
+
+    """
+    Stores button click analytics in user_clicks table
+    """
     try:
-        resp = supabase_admin.table("user_clicks").insert({
+        supabase_admin.table("user_clicks").insert({
             "chat_id": chat_id,
             "user_email": user_email,
             "user_type": "user" if user_role != "guest" else "guest",
             "button": button,
             "question": question
         }).execute()
-
-        print("✅ CLICK TRACKED:", resp.data)
-
     except Exception as e:
-        print("❌ CLICK TRACK FAILED:", str(e))
+        print("❌ CLICK TRACK ERROR:", e)
 
 
 
@@ -318,3 +319,4 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
 
 
     return {"status": "email_sent"}
+

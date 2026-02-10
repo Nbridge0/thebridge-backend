@@ -333,33 +333,47 @@ def chat_message(req: ChatRequest):
 
 
 @app.post("/chat/ask-ai")
-def chat_ask_ai(req: ChatRequest):
+def chat_ask_ai(req: dict):
+    """
+    Handles:
+    - normal Ask AI flow
+    - frontend-only click tracking for gated buttons
+    """
 
-    # ✅ TRACK BUTTON CLICK (ALWAYS, even if guest / no chat yet)
+    # 🔒 FRONTEND-ONLY CLICK TRACKING (guest intent)
+    if req.get("__track_only") is True:
+        track_click(
+            chat_id=req.get("chat_id"),
+            button=req.get("button_override"),
+            question=req.get("message"),
+            user_email=req.get("user_email"),
+            user_role=req.get("user_role", "guest")
+        )
+        return {"status": "tracked"}
+
+    # ✅ NORMAL Ask AI FLOW (unchanged behavior)
     track_click(
-        chat_id=req.chat_id,
+        chat_id=req.get("chat_id"),
         button="ask_ai",
-        question=req.message,
-        user_email=req.user_email,
-        user_role=req.user_role
+        question=req.get("message"),
+        user_email=req.get("user_email"),
+        user_role=req.get("user_role", "guest")
     )
 
-    # 🤖 Generate AI answer
-    answer = ask_ai_only(req.message)
+    answer = ask_ai_only(req.get("message"))
 
-    # 💾 Save AI response in chat history (only if chat exists)
-    if req.chat_id:
+    if req.get("chat_id"):
         save_message(
-            req.chat_id,
+            req.get("chat_id"),
             "assistant",
             answer,
             "openai_only",
-            req.user_email
+            req.get("user_email")
         )
 
     return {
         "answer": answer,
-        "source": "openai_only",
+        "source": "openai_only"
     }
 
 # -------------------------
