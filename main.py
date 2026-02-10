@@ -618,4 +618,4 @@ def get_chat_messages(chat_id: int):
         .order("id") \
         .execute()
 
-    return resp.data 
+    return resp.data
