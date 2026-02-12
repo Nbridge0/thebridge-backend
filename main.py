@@ -2,7 +2,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click
+from chat import get_answer, send_help_request, ask_ai_only, ask_ai_only_with_history, save_message, track_click
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -287,29 +287,25 @@ def health():
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
+    # 🔥 REQUIRE chat_id always
+    if not req.chat_id:
+        raise HTTPException(status_code=400, detail="chat_id required")
+
     # ✅ save user message
-    if req.chat_id:
-        save_message(
-            req.chat_id,
-            "user",
-            req.message,
-            "user",
-            req.user_email
-        )
+    save_message(
+        req.chat_id,
+        "user",
+        req.message,
+        "user",
+        req.user_email
+    )
 
     try:
-        # If chat_id exists, use history-aware AI; otherwise, keep original logic
-        if req.chat_id:
-            answer = ask_ai_only_with_history(req.chat_id, req.message)
-            source = "openai_only"
-            actions = ["ask_ai", "ask_specialist", "ask_ambassador"]
-            requires_auth = False
-        else:
-            result = get_answer(req.message, req.user_role)
-            answer = result.get("answer")
-            source = result.get("source")
-            actions = result.get("actions", [])
-            requires_auth = result.get("requires_auth", False)
+        # 🔥 ALWAYS use history-aware AI
+        answer = ask_ai_only_with_history(req.chat_id, req.message)
+        source = "openai_only"
+        actions = ["ask_ai", "ask_specialist", "ask_ambassador"]
+        requires_auth = False
 
     except Exception as e:
         print("AI ERROR:", e)
@@ -321,14 +317,13 @@ def chat_message(req: ChatRequest):
         }
 
     # ✅ save bot message
-    if req.chat_id:
-        save_message(
-            req.chat_id,
-            "assistant",
-            answer,
-            source,
-            req.user_email
-        )
+    save_message(
+        req.chat_id,
+        "assistant",
+        answer,
+        source,
+        req.user_email
+    )
 
     return {
         "answer": answer,
