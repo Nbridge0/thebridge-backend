@@ -2,7 +2,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request, ask_ai_only, ask_ai_only_with_history, save_message, track_click
+from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -287,31 +287,18 @@ def health():
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
-    # If no chat_id → allow stateless AI (guests safe)
-    if not req.chat_id:
-        answer = ask_ai_only(req.message)
-        return {
-            "answer": answer,
-            "source": "openai_only",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False
-        }
-
-    # Save user message
-    save_message(
-        req.chat_id,
-        "user",
-        req.message,
-        "user",
-        req.user_email
-    )
+    # ✅ save user message
+    if req.chat_id:
+        save_message(
+            req.chat_id,
+            "user",
+            req.message,
+            "user",
+            req.user_email
+        )
 
     try:
-        answer = ask_ai_only_with_history(req.chat_id, req.message)
-        source = "openai_only"
-        actions = ["ask_ai", "ask_specialist", "ask_ambassador"]
-        requires_auth = False
-
+        result = get_answer(req.message, req.user_role)
     except Exception as e:
         print("AI ERROR:", e)
         return {
@@ -321,13 +308,20 @@ def chat_message(req: ChatRequest):
             "requires_auth": False
         }
 
-    save_message(
-        req.chat_id,
-        "assistant",
-        answer,
-        source,
-        req.user_email
-    )
+    answer = result.get("answer")
+    source = result.get("source")
+    actions = result.get("actions", [])
+    requires_auth = result.get("requires_auth", False)
+
+    # ✅ save bot message
+    if req.chat_id:
+        save_message(
+            req.chat_id,
+            "assistant",
+            answer,
+            source,
+            req.user_email
+        )
 
     return {
         "answer": answer,
@@ -335,6 +329,7 @@ def chat_message(req: ChatRequest):
         "actions": actions,
         "requires_auth": requires_auth
     }
+
 
 
 @app.post("/chat/ask-ai")
@@ -591,9 +586,8 @@ def create_chat(payload: dict):
     user_email = payload.get("user_email")
     title = payload.get("title", "New Chat")
 
-    # ✅ Allow guest chats (do NOT crash if no email)
     if not user_email:
-        user_email = "guest"
+        raise HTTPException(status_code=400, detail="user_email required")
 
     result = (
         supabase_admin
