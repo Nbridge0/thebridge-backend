@@ -298,7 +298,19 @@ def chat_message(req: ChatRequest):
         )
 
     try:
-        result = get_answer(req.message, req.user_role)
+        # If chat_id exists, use history-aware AI; otherwise, keep original logic
+        if req.chat_id:
+            answer = ask_ai_only_with_history(req.chat_id, req.message)
+            source = "openai_only"
+            actions = ["ask_ai", "ask_specialist", "ask_ambassador"]
+            requires_auth = False
+        else:
+            result = get_answer(req.message, req.user_role)
+            answer = result.get("answer")
+            source = result.get("source")
+            actions = result.get("actions", [])
+            requires_auth = result.get("requires_auth", False)
+
     except Exception as e:
         print("AI ERROR:", e)
         return {
@@ -307,11 +319,6 @@ def chat_message(req: ChatRequest):
             "actions": ["ask_ai"],
             "requires_auth": False
         }
-
-    answer = result.get("answer")
-    source = result.get("source")
-    actions = result.get("actions", [])
-    requires_auth = result.get("requires_auth", False)
 
     # ✅ save bot message
     if req.chat_id:
@@ -329,7 +336,6 @@ def chat_message(req: ChatRequest):
         "actions": actions,
         "requires_auth": requires_auth
     }
-
 
 
 @app.post("/chat/ask-ai")

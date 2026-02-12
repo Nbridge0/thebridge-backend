@@ -59,6 +59,35 @@ def get_experts_by_role(role: str):
     except Exception:
         return []
 
+
+def get_chat_history(chat_id: int):
+    resp = supabase_admin.table("chat_messages") \
+        .select("role, content") \
+        .eq("chat_id", chat_id) \
+        .order("id") \
+        .execute()
+    return resp.data or []
+
+
+def ask_ai_only_with_history(chat_id: int, new_message: str) -> str:
+    messages = [{"role": "system", "content": "You are TheBridge AI assistant for superyachting."}]
+
+    history = get_chat_history(chat_id)
+    for m in history:
+        role = "user" if m["role"] == "user" else "assistant"
+        messages.append({"role": role, "content": m["content"]})
+
+    messages.append({"role": "user", "content": new_message})
+
+    r = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.7,
+    )
+    return r.choices[0].message.content.strip()
+
+
+
 # -------------------------------
 # CONSTANTS
 # -------------------------------
