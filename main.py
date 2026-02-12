@@ -584,10 +584,12 @@ def list_chats(user_email: EmailStr):
 @app.post("/chats")
 def create_chat(payload: dict):
     user_email = payload.get("user_email")
-    title = payload.get("title", "New Chat")
+    title = payload.get("title") or "New Chat"
 
+    # Only enforce email if user is logged in
     if not user_email:
-        raise HTTPException(status_code=400, detail="user_email required")
+        # Guests don't get persistent chats
+        return {"chat_id": None}
 
     result = (
         supabase_admin
@@ -599,7 +601,7 @@ def create_chat(payload: dict):
         .execute()
     )
 
-    if not result.data or len(result.data) == 0:
+    if not result.data:
         raise HTTPException(
             status_code=500,
             detail="Failed to create chat"
