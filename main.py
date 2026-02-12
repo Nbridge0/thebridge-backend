@@ -287,11 +287,17 @@ def health():
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
-    # 🔥 REQUIRE chat_id always
+    # If no chat_id → allow stateless AI (guests safe)
     if not req.chat_id:
-        raise HTTPException(status_code=400, detail="chat_id required")
+        answer = ask_ai_only(req.message)
+        return {
+            "answer": answer,
+            "source": "openai_only",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False
+        }
 
-    # ✅ save user message
+    # Save user message
     save_message(
         req.chat_id,
         "user",
@@ -301,7 +307,6 @@ def chat_message(req: ChatRequest):
     )
 
     try:
-        # 🔥 ALWAYS use history-aware AI
         answer = ask_ai_only_with_history(req.chat_id, req.message)
         source = "openai_only"
         actions = ["ask_ai", "ask_specialist", "ask_ambassador"]
@@ -316,7 +321,6 @@ def chat_message(req: ChatRequest):
             "requires_auth": False
         }
 
-    # ✅ save bot message
     save_message(
         req.chat_id,
         "assistant",
