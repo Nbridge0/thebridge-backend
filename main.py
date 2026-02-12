@@ -587,8 +587,9 @@ def create_chat(payload: dict):
     user_email = payload.get("user_email")
     title = payload.get("title", "New Chat")
 
+    # ✅ Allow guest chats (do NOT crash if no email)
     if not user_email:
-        raise HTTPException(status_code=400, detail="user_email required")
+        user_email = "guest"
 
     result = (
         supabase_admin
