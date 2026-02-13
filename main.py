@@ -284,10 +284,13 @@ def health():
 # -------------------------
 # CHAT
 # -------------------------
+# -------------------------
+# CHAT
+# -------------------------
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
-    # ✅ save user message
+    # Save user message
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -308,12 +311,15 @@ def chat_message(req: ChatRequest):
             "requires_auth": False
         }
 
+    # ✅ MULTI-PARTNER SUPPORT
+    if "answers" in result:
+        return result
+
     answer = result.get("answer")
     source = result.get("source")
     actions = result.get("actions", [])
     requires_auth = result.get("requires_auth", False)
 
-    # ✅ save bot message
     if req.chat_id:
         save_message(
             req.chat_id,
@@ -329,7 +335,6 @@ def chat_message(req: ChatRequest):
         "actions": actions,
         "requires_auth": requires_auth
     }
-
 
 
 @app.post("/chat/ask-ai")

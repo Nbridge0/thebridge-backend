@@ -98,39 +98,23 @@ def normalize(text: str) -> str:
     )
 
 def semantic_partner_match(question: str):
+
     embedding = client.embeddings.create(
         model="text-embedding-3-small",
         input=question
     ).data[0].embedding
 
     resp = supabase_admin.rpc(
-        "match_partner_qa",
+        "match_partner_chunks",
         {
             "query_embedding": embedding,
             "match_threshold": 0.72,
-            "match_count": 1
+            "match_count": 8
         }
     ).execute()
 
-    if resp.data:
-        return resp.data[0]
+    return resp.data or []
 
-    return None
-
-
-# -------------------------------
-# PARTNER CACHE
-# -------------------------------
-def load_partner_cache():
-    try:
-        resp = supabase_admin.table("partner_qa") \
-            .select("question, answer") \
-            .execute()
-        return resp.data or []
-    except Exception:
-        return []
-
-PARTNER_CACHE = load_partner_cache()
 
 # -------------------------------
 # EMAIL (RESEND)
@@ -205,31 +189,52 @@ def ask_ai_only(question: str) -> str:
 # -------------------------------
 # CORE CHAT LOGIC
 # -------------------------------
+# -------------------------------
+# CORE CHAT LOGIC
+# -------------------------------
 def get_answer(message: str, user_role: str = "guest"):
     user_norm = normalize(message)
 
-    # 1️⃣ EXACT MATCH (fast, cheap)
-    for row in PARTNER_CACHE:
-        if normalize(row["question"]) == user_norm:
+    # 1️⃣ SEMANTIC MATCH (vector search across all partner chunks)
+    semantic_results = semantic_partner_match(message)
+
+    if semantic_results:
+
+        grouped = {}
+
+        for row in semantic_results:
+            pid = row["partner_id"]
+            grouped.setdefault(pid, []).append(row["content"])
+
+        formatted_answers = []
+
+        for partner_id, chunks in grouped.items():
+
+            partner = supabase_admin.table("partners") \
+                .select("badge_label") \
+                .eq("id", partner_id) \
+                .single() \
+                .execute()
+
+            if not partner.data:
+                continue
+
+            combined_answer = " ".join(chunks)
+
+            formatted_answers.append({
+                "partner_name": partner.data["badge_label"],
+                "answer": combined_answer
+            })
+
+        if formatted_answers:
             return {
-                "answer": row["answer"],
-                "source": "db_exact",
+                "answers": formatted_answers,
+                "source": "db_semantic_multi",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
             }
 
-    # 2️⃣ SEMANTIC MATCH (embeddings)
-    semantic = semantic_partner_match(message)
-    if semantic:
-        return {
-            "answer": semantic["answer"],
-            "source": "db_semantic",
-            "similarity": round(semantic["similarity"], 3),
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-        }
-
-    # 3️⃣ YACHTING FALLBACK
+    # 2️⃣ YACHTING FALLBACK
     yachting_keywords = [
         "yacht", "crew", "captain", "flag", "port state", "psc",
         "manning", "inspection", "maritime", "ism", "isps",
@@ -245,7 +250,7 @@ def get_answer(message: str, user_role: str = "guest"):
             "requires_auth": user_role == "guest",
         }
 
-    # 4️⃣ GENERAL AI
+    # 3️⃣ GENERAL AI
     return {
         "answer": ask_openai(message),
         "source": "openai_general",
