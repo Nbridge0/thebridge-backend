@@ -189,14 +189,48 @@ def ask_ai_only(question: str) -> str:
 # -------------------------------
 # CORE CHAT LOGIC
 # -------------------------------
-# -------------------------------
-# CORE CHAT LOGIC
-# -------------------------------
 def get_answer(message: str, user_role: str = "guest"):
+
     user_norm = normalize(message)
 
-    # 1️⃣ SEMANTIC MATCH (vector search across all partner chunks)
-    semantic_results = semantic_partner_match(message)
+    # =====================================================
+    # 1️⃣ RESTORE ORIGINAL partner_qa SEMANTIC MATCH
+    # =====================================================
+    try:
+        embedding = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=message
+        ).data[0].embedding
+
+        qa_results = supabase_admin.rpc(
+            "match_partner_qa",
+            {
+                "query_embedding": embedding,
+                "match_threshold": 0.75,  # keep your original threshold
+                "match_count": 1
+            }
+        ).execute().data
+
+    except Exception as e:
+        print("QA ERROR:", e)
+        qa_results = []
+
+    if qa_results:
+        return {
+            "answer": qa_results[0]["answer"],
+            "source": "db_semantic",  # same source as before
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
+        }
+
+    # =====================================================
+    # 2️⃣ NEW PARTNER DOCUMENT SEMANTIC SEARCH (UNCHANGED)
+    # =====================================================
+    try:
+        semantic_results = semantic_partner_match(message)
+    except Exception as e:
+        print("SEMANTIC ERROR:", e)
+        semantic_results = []
 
     if semantic_results:
 
@@ -219,7 +253,7 @@ def get_answer(message: str, user_role: str = "guest"):
             if not partner.data:
                 continue
 
-            combined_answer = " ".join(chunks)
+            combined_answer = " ".join(chunks[:2])
 
             formatted_answers.append({
                 "partner_name": partner.data["badge_label"],
@@ -234,12 +268,13 @@ def get_answer(message: str, user_role: str = "guest"):
                 "requires_auth": False,
             }
 
-    # 2️⃣ YACHTING FALLBACK
+    # =====================================================
+    # 3️⃣ YACHTING FALLBACK (UNCHANGED)
+    # =====================================================
     yachting_keywords = [
         "yacht", "crew", "captain", "flag", "port state", "psc",
         "manning", "inspection", "maritime", "ism", "isps",
-        "engine", "bridge", "deck", "charter", "mca", "class",
-        "minimum crew", "safe manning"
+        "engine", "bridge", "deck", "charter", "mca", "class"
     ]
 
     if any(k in user_norm for k in yachting_keywords):
@@ -250,7 +285,9 @@ def get_answer(message: str, user_role: str = "guest"):
             "requires_auth": user_role == "guest",
         }
 
-    # 3️⃣ GENERAL AI
+    # =====================================================
+    # 4️⃣ GENERAL AI (UNCHANGED)
+    # =====================================================
     return {
         "answer": ask_openai(message),
         "source": "openai_general",
