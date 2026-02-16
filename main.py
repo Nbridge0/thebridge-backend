@@ -11,6 +11,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import UploadFile, File
 from openai import OpenAI
+from io import BytesIO
 
 # -------------------------
 # ENV
@@ -192,15 +193,19 @@ def list_experts(role: str):
 
     return experts.data
 
+
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
 
     try:
         audio_bytes = await file.read()
 
+        audio_file = BytesIO(audio_bytes)
+        audio_file.name = "audio.webm"   # 🔥 Important
+
         transcription = openai_client.audio.transcriptions.create(
             model="gpt-4o-mini-transcribe",
-            file=("audio.webm", audio_bytes)
+            file=audio_file
         )
 
         return {"text": transcription.text}
@@ -208,7 +213,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
     except Exception as e:
         print("TRANSCRIPTION ERROR:", e)
         raise HTTPException(status_code=500, detail="Transcription failed")
-
 
 
 # -------------------------
