@@ -9,6 +9,9 @@ from dotenv import load_dotenv, find_dotenv
 import secrets
 import requests
 from datetime import datetime, timedelta, timezone
+from fastapi import UploadFile, File
+from openai import OpenAI
+
 # -------------------------
 # ENV
 # -------------------------
@@ -20,6 +23,11 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+
 
 FROM_EMAIL = os.getenv("FROM_EMAIL")
 
@@ -184,6 +192,24 @@ def list_experts(role: str):
 
     return experts.data
 
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+
+    try:
+        audio_bytes = await file.read()
+
+        transcription = openai_client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=("audio.webm", audio_bytes)
+        )
+
+        return {"text": transcription.text}
+
+    except Exception as e:
+        print("TRANSCRIPTION ERROR:", e)
+        raise HTTPException(status_code=500, detail="Transcription failed")
+
+
 
 # -------------------------
 # MODELS
@@ -284,9 +310,6 @@ def health():
 # -------------------------
 # CHAT
 # -------------------------
-# -------------------------
-# CHAT
-# -------------------------
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
@@ -301,7 +324,7 @@ def chat_message(req: ChatRequest):
         )
 
     try:
-        result = get_answer(req.message, req.user_role)
+        result = get_answer(req.message, req.user_role, req.chat_id)
     except Exception as e:
         print("AI ERROR:", e)
         return {

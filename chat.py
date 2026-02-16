@@ -116,6 +116,33 @@ def semantic_partner_match(question: str):
     return resp.data or []
 
 
+def get_chat_history(chat_id: int):
+    try:
+        resp = supabase_admin.table("chat_messages") \
+            .select("role, content") \
+            .eq("chat_id", chat_id) \
+            .order("id") \
+            .execute()
+
+        if not resp.data:
+            return []
+
+        history = []
+        for msg in resp.data:
+            if msg["role"] in ["user", "assistant"]:
+                history.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+
+        return history
+
+    except Exception as e:
+        print("HISTORY ERROR:", e)
+        return []
+
+
+
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
@@ -187,14 +214,47 @@ def ask_ai_only(question: str) -> str:
 
 
 # -------------------------------
-# CORE CHAT LOGIC
+# CORE CHAT LOGIC (UPDATED)
 # -------------------------------
-def get_answer(message: str, user_role: str = "guest"):
+
+def get_chat_history(chat_id: int, limit: int = 15):
+    """
+    Fetches previous chat messages for context memory.
+    Limits history to prevent token overflow.
+    """
+    try:
+        resp = supabase_admin.table("chat_messages") \
+            .select("role, content") \
+            .eq("chat_id", chat_id) \
+            .order("id") \
+            .execute()
+
+        if not resp.data:
+            return []
+
+        history = []
+
+        for msg in resp.data:
+            if msg["role"] in ["user", "assistant"]:
+                history.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+
+        # Keep only last N messages for token control
+        return history[-limit:]
+
+    except Exception as e:
+        print("HISTORY ERROR:", e)
+        return []
+
+
+def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 
     user_norm = normalize(message)
 
     # =====================================================
-    # 1️⃣ RESTORE ORIGINAL partner_qa SEMANTIC MATCH
+    # 1️⃣ PARTNER QA SEMANTIC MATCH (UNCHANGED)
     # =====================================================
     try:
         embedding = client.embeddings.create(
@@ -206,7 +266,7 @@ def get_answer(message: str, user_role: str = "guest"):
             "match_partner_qa",
             {
                 "query_embedding": embedding,
-                "match_threshold": 0.75,  # keep your original threshold
+                "match_threshold": 0.75,
                 "match_count": 1
             }
         ).execute().data
@@ -218,13 +278,13 @@ def get_answer(message: str, user_role: str = "guest"):
     if qa_results:
         return {
             "answer": qa_results[0]["answer"],
-            "source": "db_semantic",  # same source as before
+            "source": "db_semantic",
             "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
             "requires_auth": False,
         }
 
     # =====================================================
-    # 2️⃣ NEW PARTNER DOCUMENT SEMANTIC SEARCH (UNCHANGED)
+    # 2️⃣ PARTNER DOCUMENT SEMANTIC SEARCH (UNCHANGED)
     # =====================================================
     try:
         semantic_results = semantic_partner_match(message)
@@ -286,14 +346,54 @@ def get_answer(message: str, user_role: str = "guest"):
         }
 
     # =====================================================
-    # 4️⃣ GENERAL AI (UNCHANGED)
+    # 4️⃣ GENERAL AI WITH FULL MEMORY (FIXED)
     # =====================================================
+
+    history = []
+
+    if chat_id:
+        history = get_chat_history(chat_id)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI assistant for superyachting. "
+                "Maintain conversational continuity. "
+                "If the user asks to continue, expand naturally without asking for context."
+            )
+        }
+    ]
+
+    # Add previous conversation history
+    messages.extend(history)
+
+    # Add current message
+    messages.append({
+        "role": "user",
+        "content": message
+    })
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7
+        )
+
+        answer = response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print("OPENAI ERROR:", e)
+        answer = "⚠️ AI temporary error. Please try again."
+
     return {
-        "answer": ask_openai(message),
+        "answer": answer,
         "source": "openai_general",
         "actions": [],
         "requires_auth": False,
     }
+
 
 
 def save_message(chat_id, role, content, source, user_email=None):
