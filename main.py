@@ -195,12 +195,18 @@ def list_experts(role: str):
 
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-
     try:
-        # 🔥 IMPORTANT: pass file.file directly
+        # Read file bytes
+        contents = await file.read()
+
+        # Re-wrap properly with filename + content type
         transcription = openai_client.audio.transcriptions.create(
             model="gpt-4o-mini-transcribe",
-            file=file.file
+            file=(
+                file.filename,
+                contents,
+                file.content_type
+            )
         )
 
         return {"text": transcription.text}
