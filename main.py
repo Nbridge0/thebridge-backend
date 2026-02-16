@@ -11,7 +11,6 @@ import requests
 from datetime import datetime, timedelta, timezone
 from fastapi import UploadFile, File
 from openai import OpenAI
-from io import BytesIO
 
 # -------------------------
 # ENV
@@ -198,14 +197,10 @@ def list_experts(role: str):
 async def transcribe_audio(file: UploadFile = File(...)):
 
     try:
-        audio_bytes = await file.read()
-
-        audio_file = BytesIO(audio_bytes)
-        audio_file.name = "audio.webm"   # 🔥 Important
-
+        # 🔥 IMPORTANT: pass file.file directly
         transcription = openai_client.audio.transcriptions.create(
             model="gpt-4o-mini-transcribe",
-            file=audio_file
+            file=file.file
         )
 
         return {"text": transcription.text}
