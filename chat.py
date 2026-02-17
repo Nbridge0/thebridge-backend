@@ -116,33 +116,6 @@ def semantic_partner_match(question: str):
     return resp.data or []
 
 
-def get_chat_history(chat_id: int):
-    try:
-        resp = supabase_admin.table("chat_messages") \
-            .select("role, content") \
-            .eq("chat_id", chat_id) \
-            .order("id") \
-            .execute()
-
-        if not resp.data:
-            return []
-
-        history = []
-        for msg in resp.data:
-            if msg["role"] in ["user", "assistant"]:
-                history.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
-
-        return history
-
-    except Exception as e:
-        print("HISTORY ERROR:", e)
-        return []
-
-
-
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
@@ -281,6 +254,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             "source": "db_semantic",
             "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
             "requires_auth": False,
+            "new_title": None
         }
 
     # =====================================================
@@ -326,6 +300,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                 "source": "db_semantic_multi",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
+                "new_title": None
             }
 
     # =====================================================
@@ -343,10 +318,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             "source": "no_answer",
             "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
             "requires_auth": user_role == "guest",
+            "new_title": None
         }
 
     # =====================================================
-    # 4️⃣ GENERAL AI WITH FULL MEMORY (FIXED)
+    # 4️⃣ GENERAL AI WITH FULL MEMORY (UNCHANGED LOGIC)
     # =====================================================
 
     history = []
@@ -365,10 +341,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         }
     ]
 
-    # Add previous conversation history
     messages.extend(history)
 
-    # Add current message
     messages.append({
         "role": "user",
         "content": message
@@ -387,11 +361,50 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
 
+    # =====================================================
+    # 5️⃣ AUTO TITLE GENERATION (NEW – DOES NOT CHANGE LOGIC)
+    # =====================================================
+
+    new_title = None
+
+    if chat_id:
+        try:
+            existing_messages = get_chat_history(chat_id)
+
+            # Only generate title if this is first user message
+            if len(existing_messages) <= 1:
+
+                title_resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Create a short 4-6 word title summarizing this topic."
+                        },
+                        {
+                            "role": "user",
+                            "content": message
+                        }
+                    ],
+                    temperature=0.3
+                )
+
+                new_title = title_resp.choices[0].message.content.strip()
+
+                supabase_admin.table("user_chats") \
+                    .update({"title": new_title}) \
+                    .eq("id", chat_id) \
+                    .execute()
+
+        except Exception as e:
+            print("TITLE ERROR:", e)
+
     return {
         "answer": answer,
         "source": "openai_general",
         "actions": [],
         "requires_auth": False,
+        "new_title": new_title
     }
 
 

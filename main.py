@@ -358,11 +358,13 @@ def chat_message(req: ChatRequest):
         )
 
     return {
-        "answer": answer,
-        "source": source,
-        "actions": actions,
-        "requires_auth": requires_auth
+    "answer": answer,
+    "source": source,
+    "actions": actions,
+    "requires_auth": requires_auth,
+    "new_title": result.get("new_title")
     }
+
 
 
 @app.post("/chat/ask-ai")
