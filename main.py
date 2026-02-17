@@ -655,3 +655,19 @@ def get_chat_messages(chat_id: int):
         .order("id") \
         .execute()
     return resp.data
+
+
+@app.delete("/chats/{chat_id}")
+def delete_chat(chat_id: int, user_email: str):
+    supabase_admin.table("chat_messages") \
+        .delete() \
+        .eq("chat_id", chat_id) \
+        .execute()
+
+    supabase_admin.table("user_chats") \
+        .delete() \
+        .eq("id", chat_id) \
+        .eq("user_email", user_email) \
+        .execute()
+
+    return {"status": "deleted"}
