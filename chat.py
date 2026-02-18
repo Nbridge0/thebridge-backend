@@ -175,19 +175,30 @@ def ask_ai_only(question: str, chat_id: int = None) -> str:
     if chat_id:
         history = get_chat_history(chat_id)
 
+
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are TheBridge AI assistant for superyachting.\n\n"
-                "Maintain full conversational continuity using previous messages.\n"
-                "If the user asks to continue, expand naturally.\n"
-                "Never ask what they mean by 'continue' or similar follow-ups.\n"
-                "Assume they refer to the last assistant response.\n"
-                "Do not reset context unless topic clearly changes."
-            )
-        }
+    {
+        "role": "system",
+        "content": (
+            "You are TheBridge AI — a single cohesive conversational intelligence.\n\n"
+
+            "Maintain strict conversational continuity.\n"
+            "Always treat short follow-ups like 'more', 'continue', "
+            "'give me three more', or similar phrases as referring "
+            "to your immediately previous response.\n\n"
+
+            "Never change topic unless the user clearly introduces a new one.\n"
+            "Never reinterpret a follow-up as a different subject.\n\n"
+
+            "Adapt naturally to the user's tone.\n"
+            "If they ask for jokes, continue joking.\n"
+            "If they ask technical questions, stay structured and precise.\n\n"
+
+            "You are not a database. You are one continuous intelligence."
+        )
+      }
     ]
+
 
     messages.extend(history)
 
@@ -353,18 +364,25 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
     {
         "role": "system",
         "content": (
-            "You are TheBridge AI assistant for superyachting.\n\n"
-            "Maintain full conversational continuity using the previous messages.\n"
-            "Never ask the user to clarify what they mean by 'continue', "
-            "'tell me more', 'go on', or similar follow-ups.\n"
-            "If the user asks to continue or expand, always build directly "
-            "on your previous answer.\n"
-            "Assume the user is referring to the last assistant message "
-            "unless explicitly stated otherwise.\n"
-            "Do not reset context unless the user changes topic clearly."
+            "You are TheBridge AI — a single cohesive conversational intelligence.\n\n"
+
+            "Maintain strict conversational continuity.\n"
+            "Always treat short follow-ups like 'more', 'continue', "
+            "'give me three more', or similar phrases as referring "
+            "to your immediately previous response.\n\n"
+
+            "Never change topic unless the user clearly introduces a new one.\n"
+            "Never reinterpret a follow-up as a different subject.\n\n"
+
+            "Adapt naturally to the user's tone.\n"
+            "If they ask for jokes, continue joking.\n"
+            "If they ask technical questions, stay structured and precise.\n\n"
+
+            "You are not a database. You are one continuous intelligence."
         )
-     }
-   ]
+      }
+    ]
+
 
 
     messages.extend(history)
@@ -466,7 +484,6 @@ def track_click(
         }).execute()
     except Exception as e:
         print("❌ CLICK TRACK ERROR:", e)
-
 
 
 # -------------------------------
