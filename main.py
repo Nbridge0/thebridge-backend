@@ -395,7 +395,11 @@ def chat_ask_ai(req: dict):
         user_role=req.get("user_role", "guest")
     )
 
-    answer = ask_ai_only(req.get("message"))
+    answer = ask_ai_only(
+         req.get("message"),
+         req.get("chat_id")
+    )
+
 
     if req.get("chat_id"):
         save_message(

@@ -168,21 +168,40 @@ def ask_openai(question: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
-def ask_ai_only(question: str) -> str:
-    r = openai.chat.completions.create(
-        model="gpt-4o-mini",  # SAME as Streamlit
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are TheBridge AI assistant for superyachting. "
-                    "Answer fully and clearly. Do NOT use stored or database answers."
-                )
-            },
-            {"role": "user", "content": question},
-        ],
+def ask_ai_only(question: str, chat_id: int = None) -> str:
+
+    history = []
+
+    if chat_id:
+        history = get_chat_history(chat_id)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI assistant for superyachting.\n\n"
+                "Maintain full conversational continuity using previous messages.\n"
+                "If the user asks to continue, expand naturally.\n"
+                "Never ask what they mean by 'continue' or similar follow-ups.\n"
+                "Assume they refer to the last assistant response.\n"
+                "Do not reset context unless topic clearly changes."
+            )
+        }
+    ]
+
+    messages.extend(history)
+
+    messages.append({
+        "role": "user",
+        "content": question
+    })
+
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
         temperature=0.7,
     )
+
     return r.choices[0].message.content.strip()
 
 
@@ -331,15 +350,22 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         history = get_chat_history(chat_id)
 
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are TheBridge AI assistant for superyachting. "
-                "Maintain conversational continuity. "
-                "If the user asks to continue, expand naturally without asking for context."
-            )
-        }
-    ]
+    {
+        "role": "system",
+        "content": (
+            "You are TheBridge AI assistant for superyachting.\n\n"
+            "Maintain full conversational continuity using the previous messages.\n"
+            "Never ask the user to clarify what they mean by 'continue', "
+            "'tell me more', 'go on', or similar follow-ups.\n"
+            "If the user asks to continue or expand, always build directly "
+            "on your previous answer.\n"
+            "Assume the user is referring to the last assistant message "
+            "unless explicitly stated otherwise.\n"
+            "Do not reset context unless the user changes topic clearly."
+        )
+     }
+   ]
+
 
     messages.extend(history)
 
