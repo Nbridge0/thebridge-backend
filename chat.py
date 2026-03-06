@@ -1,6 +1,6 @@
 import os
 import random
-import string
+import stringr
 import secrets
 import requests
 import openai
@@ -8,7 +8,6 @@ from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from typing import Optional
-
 
 # -------------------------------
 # ENV
@@ -65,7 +64,7 @@ def get_experts_by_role(role: str):
 NO_ANSWER_FALLBACK = (
     "Oops! You caught us.\n"
     "We don't have the answer just yet, but TheBridge is always growing.\n"
-    "Try Ask AI, Ask a Specialist or Ask an Ambassador."
+    "Try Ask AI or Ask a Specialist."
 )
 
 
@@ -390,9 +389,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         )
     }
 ]
-
-
-
 
     messages.extend(history)
 
