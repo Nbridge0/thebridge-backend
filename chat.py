@@ -1,6 +1,6 @@
 import os
 import random
-import stringr
+import string
 import secrets
 import requests
 import openai
