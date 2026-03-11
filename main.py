@@ -675,3 +675,22 @@ def delete_chat(chat_id: int, user_email: str):
         .execute()
 
     return {"status": "deleted"}
+
+
+
+# -------------------------
+# SUGGESTED QUESTIONS
+# -------------------------
+@app.get("/suggested-questions")
+def get_suggested_questions():
+
+    resp = supabase_admin.table("suggested_questions") \
+        .select("question") \
+        .eq("is_active", True) \
+        .order("display_order") \
+        .execute()
+
+    if not resp.data:
+        return []
+
+    return [row["question"] for row in resp.data]
