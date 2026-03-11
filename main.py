@@ -509,7 +509,7 @@ def verify(req: VerifyRequest):
     supabase_admin.table("user_profiles").upsert({
         "id": user_id,
         "email": email,
-        "name": record["name"]
+        "name": record["name"],
         "newsletter": record.get("newsletter", False)
     }).execute()
 
