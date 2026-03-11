@@ -703,7 +703,6 @@ def delete_chat(chat_id: int, user_email: str):
     return {"status": "deleted"}
 
 
-
 # -------------------------
 # SUGGESTED QUESTIONS
 # -------------------------
@@ -720,3 +719,4 @@ def get_suggested_questions():
         return []
 
     return [row["question"] for row in resp.data]
+
