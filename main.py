@@ -230,7 +230,7 @@ class SignupRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
-
+    newsletter: bool = False
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -453,6 +453,7 @@ def signup(req: SignupRequest):
         "email": email,
         "name": req.name,
         "password": req.password,
+        "newsletter": req.newsletter,
         "code": code,
         "expires_at": expiry.isoformat()
     }).execute()
@@ -509,6 +510,7 @@ def verify(req: VerifyRequest):
         "id": user_id,
         "email": email,
         "name": record["name"]
+        "newsletter": record.get("newsletter", False)
     }).execute()
 
     send_email(
