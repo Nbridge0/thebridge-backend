@@ -268,6 +268,30 @@ class HelpRequest(BaseModel):
     user_role: str = "guest"
 
 
+class RenameChatRequest(BaseModel):
+    chat_id: int
+    title: str
+
+
+@app.put("/chats/{chat_id}/rename")
+def rename_chat(chat_id: int, payload: dict):
+
+    title = payload.get("title")
+    user_email = payload.get("user_email")
+
+    if not title:
+        raise HTTPException(status_code=400, detail="Title required")
+
+    resp = supabase_admin.table("user_chats") \
+        .update({"title": title}) \
+        .eq("id", chat_id) \
+        .eq("user_email", user_email) \
+        .execute()
+
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    return {"status": "renamed"}
 
 @app.post("/help/send")
 def help_send(req: HelpRequest):
