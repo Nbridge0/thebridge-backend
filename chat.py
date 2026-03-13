@@ -332,7 +332,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 
         if qa_results:
             return {
-                "answer": qa_results[0]["answer"],
+                "answers": [
+                    {
+                         "partner_name": qa_results[0]["partner_name"],
+                         "answer": qa_results[0]["answer"]
+                    }
+                ],
                 "source": "partner_qa",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
