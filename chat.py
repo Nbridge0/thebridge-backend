@@ -114,6 +114,23 @@ def semantic_partner_match(question: str):
 
     return resp.data or []
 
+def semantic_bridge_match(question: str):
+
+    embedding = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=question
+    ).data[0].embedding
+
+    resp = supabase_admin.rpc(
+        "match_bridge_chunks",
+        {
+            "query_embedding": embedding,
+            "match_threshold": 0.72,
+            "match_count": 5
+        }
+    ).execute()
+
+    return resp.data or []
 
 # -------------------------------
 # EMAIL (RESEND)
@@ -259,85 +276,156 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 
     user_norm = normalize(message)
 
-    # =====================================================
-    # 1️⃣ PARTNER QA SEMANTIC MATCH (UNCHANGED)
-    # =====================================================
+    # Create embedding once
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
             input=message
         ).data[0].embedding
-
-        qa_results = supabase_admin.rpc(
-            "match_partner_qa",
-            {
-                "query_embedding": embedding,
-                "match_threshold": 0.75,
-                "match_count": 1
-            }
-        ).execute().data
-
     except Exception as e:
-        print("QA ERROR:", e)
-        qa_results = []
-
-    if qa_results:
-        return {
-            "answer": qa_results[0]["answer"],
-            "source": "db_semantic",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-            "new_title": None
-        }
+        print("EMBEDDING ERROR:", e)
+        embedding = None
 
     # =====================================================
-    # 2️⃣ PARTNER DOCUMENT SEMANTIC SEARCH (UNCHANGED)
+    # 1️⃣ THEBRIDGE QA
     # =====================================================
-    try:
-        semantic_results = semantic_partner_match(message)
-    except Exception as e:
-        print("SEMANTIC ERROR:", e)
-        semantic_results = []
+    if embedding:
+        try:
+            bridge_qa = supabase_admin.rpc(
+                "match_bridge_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.75,
+                    "match_count": 1
+                }
+            ).execute().data
+        except Exception as e:
+            print("BRIDGE QA ERROR:", e)
+            bridge_qa = []
 
-    if semantic_results:
-
-        grouped = {}
-
-        for row in semantic_results:
-            pid = row["partner_id"]
-            grouped.setdefault(pid, []).append(row["content"])
-
-        formatted_answers = []
-
-        for partner_id, chunks in grouped.items():
-
-            partner = supabase_admin.table("partners") \
-                .select("badge_label") \
-                .eq("id", partner_id) \
-                .single() \
-                .execute()
-
-            if not partner.data:
-                continue
-
-            combined_answer = " ".join(chunks[:2])
-
-            formatted_answers.append({
-                "partner_name": partner.data["badge_label"],
-                "answer": combined_answer
-            })
-
-        if formatted_answers:
+        if bridge_qa:
             return {
-                "answers": formatted_answers,
-                "source": "db_semantic_multi",
+                "answer": bridge_qa[0]["answer"],
+                "source": "bridge_semantic",
+                "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
     # =====================================================
-    # 3️⃣ YACHTING FALLBACK (UNCHANGED)
+    # 2️⃣ PARTNER QA
+    # =====================================================
+    if embedding:
+        try:
+            qa_results = supabase_admin.rpc(
+                "match_partner_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.75,
+                    "match_count": 1
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER QA ERROR:", e)
+            qa_results = []
+
+        if qa_results:
+            return {
+                "answer": qa_results[0]["answer"],
+                "source": "partner_qa",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # =====================================================
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
+    # =====================================================
+    if embedding:
+        try:
+            bridge_results = supabase_admin.rpc(
+                "match_bridge_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.72,
+                    "match_count": 5
+                }
+            ).execute().data
+        except Exception as e:
+            print("BRIDGE DOC ERROR:", e)
+            bridge_results = []
+
+        if bridge_results:
+            combined_answer = " ".join(
+                [row["content"] for row in bridge_results[:2]]
+            )
+
+            return {
+                "answer": combined_answer,
+                "source": "bridge_docs",
+                "badge": "TheBridge",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # =====================================================
+    # 4️⃣ PARTNER DOCUMENT SEARCH
+    # =====================================================
+    if embedding:
+        try:
+            semantic_results = supabase_admin.rpc(
+                "match_partner_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.72,
+                    "match_count": 8
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER DOC ERROR:", e)
+            semantic_results = []
+
+        if semantic_results:
+
+            grouped = {}
+
+            for row in semantic_results:
+                pid = row["partner_id"]
+                grouped.setdefault(pid, []).append(row["content"])
+
+            formatted_answers = []
+
+            for partner_id, chunks in grouped.items():
+
+                partner = supabase_admin.table("partners") \
+                    .select("badge_label") \
+                    .eq("id", partner_id) \
+                    .single() \
+                    .execute()
+
+                if not partner.data:
+                    continue
+
+                combined_answer = " ".join(chunks[:2])
+
+                formatted_answers.append({
+                    "partner_name": partner.data["badge_label"],
+                    "answer": combined_answer
+                })
+
+            if formatted_answers:
+                return {
+                    "answers": formatted_answers,
+                    "source": "db_semantic_multi",
+                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                    "requires_auth": False,
+                    "new_title": None
+                }
+
+    # =====================================================
+    # 5️⃣ YACHTING FALLBACK
     # =====================================================
     yachting_keywords = [
         "yacht", "crew", "captain", "flag", "port state", "psc",
@@ -355,40 +443,22 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         }
 
     # =====================================================
-    # 4️⃣ GENERAL AI WITH FULL MEMORY (UNCHANGED LOGIC)
+    # 6️⃣ AI RESPONSE
     # =====================================================
-
     history = []
 
     if chat_id:
         history = get_chat_history(chat_id)
 
     messages = [
-    {
-        "role": "system",
-        "content": (
-            "You are TheBridge AI.\n\n"
-
-            "You are a continuous conversational intelligence.\n"
-            "You always use the previous assistant message as context.\n\n"
-
-            "If the user says things like:\n"
-            "'more', 'tell me more', 'two more', 'three more', "
-            "'continue', 'go on', or similar short follow-ups —\n"
-            "you MUST continue the exact same content type and format "
-            "as your previous response.\n\n"
-
-            "You are NOT allowed to ask what they mean.\n"
-            "You are NOT allowed to request clarification "
-            "when a previous assistant message exists.\n\n"
-
-            "Only ask for clarification if there is truly no previous "
-            "assistant response to continue from.\n\n"
-
-            "Maintain a natural, confident, human tone."
-        )
-    }
-]
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI.\n\n"
+                "Maintain a natural, confident, human tone."
+            )
+        }
+    ]
 
     messages.extend(history)
 
@@ -411,16 +481,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         answer = "⚠️ AI temporary error. Please try again."
 
     # =====================================================
-    # 5️⃣ AUTO TITLE GENERATION (NEW – DOES NOT CHANGE LOGIC)
+    # 7️⃣ AUTO TITLE GENERATION
     # =====================================================
-
     new_title = None
 
     if chat_id:
         try:
             existing_messages = get_chat_history(chat_id)
 
-            # Only generate title if this is first user message
             if len(existing_messages) <= 1:
 
                 title_resp = client.chat.completions.create(
@@ -455,7 +523,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         "requires_auth": False,
         "new_title": new_title
     }
-
 
 
 def save_message(chat_id, role, content, source, user_email=None):
