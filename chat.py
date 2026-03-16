@@ -334,8 +334,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             return {
                 "answers": [
                     {
-                         "partner_name": qa_results[0]["partner_name"],
-                         "answer": qa_results[0]["answer"]
+                        "partner_name": qa_results[0]["partner_name"],
+                        "answer": qa_results[0]["answer"]
                     }
                 ],
                 "source": "partner_qa",
@@ -354,7 +354,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.72,
-                    "match_count": 5
+                    "match_count": 8
                 }
             ).execute().data
         except Exception as e:
@@ -362,9 +362,41 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             bridge_results = []
 
         if bridge_results:
-            combined_answer = " ".join(
-                [row["content"] for row in bridge_results[:2]]
-            )
+
+            context = "\n\n".join([row["content"] for row in bridge_results])
+
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a maritime knowledge assistant. "
+                                "Answer ONLY using the provided documentation."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""
+Question:
+{message}
+
+Documentation:
+{context}
+
+Provide a clear and complete answer using only this information.
+"""
+                        }
+                    ],
+                    temperature=0.2
+                )
+
+                combined_answer = response.choices[0].message.content.strip()
+
+            except Exception as e:
+                print("DOC AI ERROR:", e)
+                combined_answer = context
 
             return {
                 "answer": combined_answer,
@@ -413,7 +445,40 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                 if not partner.data:
                     continue
 
-                combined_answer = " ".join(chunks[:2])
+                context = "\n\n".join(chunks)
+
+                try:
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a maritime assistant. "
+                                    "Answer using ONLY the provided partner documentation."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""
+Question:
+{message}
+
+Partner documentation:
+{context}
+
+Provide a clear answer using only this information.
+"""
+                            }
+                        ],
+                        temperature=0.2
+                    )
+
+                    combined_answer = response.choices[0].message.content.strip()
+
+                except Exception as e:
+                    print("PARTNER DOC SYNTHESIS ERROR:", e)
+                    combined_answer = context
 
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
@@ -528,7 +593,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         "requires_auth": False,
         "new_title": new_title
     }
-
 
 def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
