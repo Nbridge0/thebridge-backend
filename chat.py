@@ -295,7 +295,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.75,
-                    "match_count": 1
+                    "match_count": 3
                 }
             ).execute().data
         except Exception as e:
@@ -304,7 +304,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 
         if bridge_qa:
 
-            base_answer = bridge_qa[0]["answer"]
+            answers = [row["answer"] for row in bridge_qa]
+            combined_context = "\n\n".join(answers)
 
             history = []
             if chat_id:
@@ -318,7 +319,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                             "role": "system",
                             "content": (
                                 "You are TheBridge AI.\n\n"
-                                "Use the provided database answer as the source of truth.\n"
+                                "Use the provided database answers as the source of truth.\n"
                                 "You may expand, clarify, and improve it slightly.\n"
                                 "If the user asks a follow-up (like 'more', 'continue', etc.), continue naturally.\n"
                                 "Do NOT contradict the database answer.\n"
@@ -332,10 +333,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 User question:
 {message}
 
-Database answer:
-{base_answer}
+Database answers:
+{combined_context}
 
-Provide a slightly improved and expanded version of this answer.
+Combine these into ONE clear, consistent answer.
+Remove duplicates and keep structure clean.
 """
                         }
                     ],
@@ -346,7 +348,7 @@ Provide a slightly improved and expanded version of this answer.
 
             except Exception as e:
                 print("BRIDGE QA ENRICH ERROR:", e)
-                final_answer = base_answer
+                final_answer = combined_context
 
             return {
                 "answer": final_answer,
