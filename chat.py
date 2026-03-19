@@ -88,6 +88,23 @@ Warm regards,
 TheBridge Team
 """
 
+BASE_SYSTEM_PROMPT = (
+    "You are TheBridge AI.\n\n"
+
+    "You are a continuous conversational intelligence.\n"
+    "You ALWAYS use previous messages as context.\n\n"
+
+    "If the user says things like:\n"
+    "'more', 'tell me more', 'continue', 'go on', "
+    "'expand', 'elaborate', etc —\n"
+    "you MUST continue the previous answer naturally.\n\n"
+
+    "DO NOT ask for clarification if a previous answer exists.\n"
+    "DO NOT reset the conversation.\n\n"
+
+    "Maintain a confident, natural, human tone."
+)
+
 # -------------------------------
 # UTILITIES
 # -------------------------------
@@ -265,7 +282,7 @@ def get_chat_history(chat_id: int, limit: int = 15):
                 })
 
         # Keep only last N messages for token control
-        return history[-limit:]
+        return history[-20:]
 
     except Exception as e:
         print("HISTORY ERROR:", e)
@@ -318,8 +335,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
                         {
                             "role": "system",
                             "content": (
-                                "You are TheBridge AI.\n\n"
-                                "Use the provided database answers as the source of truth.\n"
+                                BASE_SYSTEM_PROMPT +
+                                "\n\nUse the provided database answers as the source of truth. "
+                                "You may expand but must not contradict."
                                 "You may expand, clarify, and improve it slightly.\n"
                                 "If the user asks a follow-up (like 'more', 'continue', etc.), continue naturally.\n"
                                 "Do NOT contradict the database answer.\n"
@@ -412,20 +430,23 @@ Remove duplicates and keep structure clean.
 
             context = "\n\n".join([row["content"] for row in bridge_results])
 
+            history = []
+            if chat_id:
+               history = get_chat_history(chat_id)
+
             try:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {
                             "role": "system",
-                            "content": (
-                                "You are a maritime knowledge assistant. "
-                                "Answer ONLY using the provided documentation."
-                            )
+                            "content": BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided documentation."
                         },
+                        *history,
                         {
                             "role": "user",
                             "content": f"""
+
 Question:
 {message}
 
@@ -501,10 +522,10 @@ Provide a clear and complete answer using only this information.
                             {
                                 "role": "system",
                                 "content": (
-                                    "You are a maritime assistant. "
-                                    "Answer using ONLY the provided partner documentation."
+                                    BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided partner documentation."
                                 )
                             },
+                            *history,
                             {
                                 "role": "user",
                                 "content": f"""
@@ -570,10 +591,7 @@ Provide a clear answer using only this information.
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are TheBridge AI.\n\n"
-                "Maintain a natural, confident, human tone."
-            )
+            "content": BASE_SYSTEM_PROMPT
         }
     ]
 
