@@ -276,7 +276,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
 
     user_norm = normalize(message)
 
-    # Create embedding once
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
@@ -287,7 +286,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA
+    # 1️⃣ THEBRIDGE QA (ENRICHED WITH AI + MEMORY)
     # =====================================================
     if embedding:
         try:
@@ -304,15 +303,61 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             bridge_qa = []
 
         if bridge_qa:
+
+            base_answer = bridge_qa[0]["answer"]
+
+            history = []
+            if chat_id:
+                history = get_chat_history(chat_id)
+
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are TheBridge AI.\n\n"
+                                "Use the provided database answer as the source of truth.\n"
+                                "You may expand, clarify, and improve it slightly.\n"
+                                "If the user asks a follow-up (like 'more', 'continue', etc.), continue naturally.\n"
+                                "Do NOT contradict the database answer.\n"
+                                "Keep answers clear, structured, and helpful."
+                            )
+                        },
+                        *history,
+                        {
+                            "role": "user",
+                            "content": f"""
+User question:
+{message}
+
+Database answer:
+{base_answer}
+
+Provide a slightly improved and expanded version of this answer.
+"""
+                        }
+                    ],
+                    temperature=0.5
+                )
+
+                final_answer = response.choices[0].message.content.strip()
+
+            except Exception as e:
+                print("BRIDGE QA ENRICH ERROR:", e)
+                final_answer = base_answer
+
             return {
-                "answer": bridge_qa[0]["answer"],
-                "source": "bridge_semantic",
+                "answer": final_answer,
+                "source": "bridge_semantic_enriched",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
+    # 👇 THEN your existing sections continue normally
     # =====================================================
     # 2️⃣ PARTNER QA
     # =====================================================
