@@ -295,9 +295,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     # ✅ ALWAYS TRUST FRONTEND HISTORY FOR GUESTS
     if not chat_id:
-       history = history or []
+        history = history or []
     else:
-       history = get_chat_history(chat_id)
+        history = get_chat_history(chat_id)
 
     print("HISTORY DEBUG:", history)
 
@@ -311,7 +311,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (ENRICHED WITH AI + MEMORY)
+    # 1️⃣ THEBRIDGE QA (ENRICHED WITH AI + MEMORY) ✅ UPDATED
     # =====================================================
     if embedding:
         try:
@@ -330,10 +330,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if bridge_qa:
 
             answers = [row["answer"] for row in bridge_qa]
-            combined_context = "\n\n".join(answers)
 
-         
-           
+            # ✅ BETTER STRUCTURED CONTEXT
+            combined_context = "\n\n---\n\n".join([
+                f"Source {i+1}:\n{a}" for i, a in enumerate(answers)
+            ])
+
             try:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -342,12 +344,29 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                             "role": "system",
                             "content": (
                                 BASE_SYSTEM_PROMPT +
-                                "\n\nUse the provided database answers as the source of truth. "
-                                "You may expand but must not contradict."
-                                "You may expand, clarify, and improve it slightly.\n"
-                                "If the user asks a follow-up (like 'more', 'continue', etc.), continue naturally.\n"
-                                "Do NOT contradict the database answer.\n"
-                                "Keep answers clear, structured, and helpful."
+
+                                "\n\nYou are generating enriched knowledge answers from TheBridge database.\n\n"
+
+                                "CRITICAL RULES:\n"
+                                "- The database content is the SOURCE OF TRUTH\n"
+                                "- You MUST use ALL relevant information from it\n"
+                                "- You MUST NOT contradict it\n\n"
+
+                                "HOW TO ANSWER:\n"
+                                "1. Start with a clear, direct definition of the topic\n"
+                                "2. Then expand by combining ALL useful points from the database\n"
+                                "3. Add structure if helpful (short paragraphs or sections)\n"
+                                "4. Include additional context, explanation, or examples IF they align with the database\n\n"
+
+                                "GOAL:\n"
+                                "The answer should feel COMPLETE and WELL-ROUNDED — not just a single sentence.\n\n"
+
+                                "DO NOT:\n"
+                                "- Just repeat one answer\n"
+                                "- Leave useful database details unused\n"
+                                "- Be overly short if more info exists\n\n"
+
+                                "If multiple database answers exist, intelligently merge them into one coherent explanation."
                             )
                         },
                         *history,
@@ -360,12 +379,17 @@ User question:
 Database answers:
 {combined_context}
 
-Combine these into ONE clear, consistent answer.
-Remove duplicates and keep structure clean.
+Create a COMPLETE, enriched answer.
+
+- Start with a clear definition
+- Then expand using ALL relevant information from the database
+- Merge overlapping ideas cleanly
+- Avoid repetition
+- Make the answer feel structured and comprehensive
 """
                         }
                     ],
-                    temperature=0.5
+                    temperature=0.4
                 )
 
                 final_answer = response.choices[0].message.content.strip()
@@ -383,7 +407,6 @@ Remove duplicates and keep structure clean.
                 "new_title": None
             }
 
-    # 👇 THEN your existing sections continue normally
     # =====================================================
     # 2️⃣ PARTNER QA
     # =====================================================
@@ -436,9 +459,6 @@ Remove duplicates and keep structure clean.
 
             context = "\n\n".join([row["content"] for row in bridge_results])
 
-
-        
-
             try:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -451,7 +471,6 @@ Remove duplicates and keep structure clean.
                         {
                             "role": "user",
                             "content": f"""
-
 Question:
 {message}
 
@@ -498,8 +517,7 @@ Provide a clear and complete answer using only this information.
             semantic_results = []
 
         if semantic_results:
-    
- 
+
             grouped = {}
 
             for row in semantic_results:
@@ -589,8 +607,6 @@ Provide a clear answer using only this information.
     # =====================================================
     # 6️⃣ AI RESPONSE
     # =====================================================
-
- 
     messages = [
         {
             "role": "system",
@@ -661,7 +677,6 @@ Provide a clear answer using only this information.
         "requires_auth": False,
         "new_title": new_title
     }
-
 def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
         "chat_id": chat_id,
