@@ -219,11 +219,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
 # -------------------------
 # MODELS
 # -------------------------
-class ChatRequest(BaseModel):
-    chat_id: Optional[int] = None
-    message: str
-    user_role: str = "guest"
-    user_email: Optional[str] = None
 
 
 class SignupRequest(BaseModel):
@@ -271,6 +266,13 @@ class HelpRequest(BaseModel):
 class RenameChatRequest(BaseModel):
     chat_id: int
     title: str
+
+class ChatRequest(BaseModel):
+    chat_id: Optional[int] = None
+    message: str
+    user_role: str = "guest"
+    user_email: Optional[str] = None
+    history: Optional[list] = []   # ✅ ADD THIS
 
 
 @app.put("/chats/{chat_id}/rename")
@@ -353,7 +355,7 @@ def chat_message(req: ChatRequest):
         )
 
     try:
-        result = get_answer(req.message, req.user_role, req.chat_id)
+        result = get_answer(req.message, req.user_role, req.chat_id, req.history)
     except Exception as e:
         print("AI ERROR:", e)
         return {
@@ -421,7 +423,8 @@ def chat_ask_ai(req: dict):
 
     answer = ask_ai_only(
          req.get("message"),
-         req.get("chat_id")
+         req.get("chat_id"),
+         req.get("history")
     )
 
 

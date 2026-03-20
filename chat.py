@@ -201,12 +201,14 @@ def ask_openai(question: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
-def ask_ai_only(question: str, chat_id: int = None) -> str:
+def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str:
 
-    history = []
 
     if chat_id:
         history = get_chat_history(chat_id)
+    else:
+        history = history or []
+
 
 
     messages = [
@@ -289,7 +291,7 @@ def get_chat_history(chat_id: int, limit: int = 15):
         return []
 
 
-def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
+def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
 
@@ -324,9 +326,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None):
             answers = [row["answer"] for row in bridge_qa]
             combined_context = "\n\n".join(answers)
 
-            history = []
+            
             if chat_id:
                 history = get_chat_history(chat_id)
+            else:
+                history = history or []
 
             try:
                 response = client.chat.completions.create(
@@ -430,9 +434,11 @@ Remove duplicates and keep structure clean.
 
             context = "\n\n".join([row["content"] for row in bridge_results])
 
-            history = []
+
             if chat_id:
                history = get_chat_history(chat_id)
+            else:
+                history = history or []
 
             try:
                 response = client.chat.completions.create(
@@ -493,6 +499,10 @@ Provide a clear and complete answer using only this information.
             semantic_results = []
 
         if semantic_results:
+            if chat_id:
+                history = get_chat_history(chat_id)
+            else:
+                history = history or []
 
             grouped = {}
 
@@ -583,10 +593,11 @@ Provide a clear answer using only this information.
     # =====================================================
     # 6️⃣ AI RESPONSE
     # =====================================================
-    history = []
 
     if chat_id:
         history = get_chat_history(chat_id)
+    else:
+        history = history or []
 
     messages = [
         {
