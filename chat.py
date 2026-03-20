@@ -311,7 +311,128 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (ENRICHED WITH AI + MEMORY) ✅ UPDATED
+    # 1 PARTNER QA
+    # =====================================================
+    if embedding:
+        try:
+            qa_results = supabase_admin.rpc(
+                "match_partner_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.75,
+                    "match_count": 1
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER QA ERROR:", e)
+            qa_results = []
+
+        if qa_results:
+            return {
+                "answers": [
+                    {
+                        "partner_name": qa_results[0]["partner_name"],
+                        "answer": qa_results[0]["answer"]
+                    }
+                ],
+                "source": "partner_qa",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+        # =====================================================
+    # 2 PARTNER DOCUMENT SEARCH
+    # =====================================================
+    if embedding:
+        try:
+            semantic_results = supabase_admin.rpc(
+                "match_partner_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.72,
+                    "match_count": 8
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER DOC ERROR:", e)
+            semantic_results = []
+
+        if semantic_results:
+
+            grouped = {}
+
+            for row in semantic_results:
+                pid = row["partner_id"]
+                grouped.setdefault(pid, []).append(row["content"])
+
+            formatted_answers = []
+
+            for partner_id, chunks in grouped.items():
+
+                partner = supabase_admin.table("partners") \
+                    .select("badge_label") \
+                    .eq("id", partner_id) \
+                    .single() \
+                    .execute()
+
+                if not partner.data:
+                    continue
+
+                context = "\n\n".join(chunks)
+
+                try:
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided partner documentation."
+                                )
+                            },
+                            *history,
+                            {
+                                "role": "user",
+                                "content": f"""
+Question:
+{message}
+
+Partner documentation:
+{context}
+
+Provide a clear answer using only this information.
+"""
+                            }
+                        ],
+                        temperature=0.2
+                    )
+
+                    combined_answer = response.choices[0].message.content.strip()
+
+                except Exception as e:
+                    print("PARTNER DOC SYNTHESIS ERROR:", e)
+                    combined_answer = context
+
+                formatted_answers.append({
+                    "partner_name": partner.data["badge_label"],
+                    "answer": combined_answer
+                })
+
+            if formatted_answers:
+                return {
+                    "answers": formatted_answers,
+                    "source": "db_semantic_multi",
+                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                    "requires_auth": False,
+                    "new_title": None
+                }
+
+
+    
+
+    # =====================================================
+    # 3 THEBRIDGE QA (ENRICHED WITH AI + MEMORY) ✅ UPDATED
     # =====================================================
     if embedding:
         try:
@@ -412,39 +533,9 @@ Create a COMPLETE, enriched answer.
                 "new_title": None
             }
 
-    # =====================================================
-    # 2️⃣ PARTNER QA
-    # =====================================================
-    if embedding:
-        try:
-            qa_results = supabase_admin.rpc(
-                "match_partner_qa",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.75,
-                    "match_count": 1
-                }
-            ).execute().data
-        except Exception as e:
-            print("PARTNER QA ERROR:", e)
-            qa_results = []
-
-        if qa_results:
-            return {
-                "answers": [
-                    {
-                        "partner_name": qa_results[0]["partner_name"],
-                        "answer": qa_results[0]["answer"]
-                    }
-                ],
-                "source": "partner_qa",
-                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                "requires_auth": False,
-                "new_title": None
-            }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
+    # 4 THEBRIDGE DOCUMENT SEARCH
     # =====================================================
     if embedding:
         try:
@@ -504,92 +595,6 @@ Provide a clear and complete answer using only this information.
                 "new_title": None
             }
 
-    # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH
-    # =====================================================
-    if embedding:
-        try:
-            semantic_results = supabase_admin.rpc(
-                "match_partner_chunks",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.72,
-                    "match_count": 8
-                }
-            ).execute().data
-        except Exception as e:
-            print("PARTNER DOC ERROR:", e)
-            semantic_results = []
-
-        if semantic_results:
-
-            grouped = {}
-
-            for row in semantic_results:
-                pid = row["partner_id"]
-                grouped.setdefault(pid, []).append(row["content"])
-
-            formatted_answers = []
-
-            for partner_id, chunks in grouped.items():
-
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", partner_id) \
-                    .single() \
-                    .execute()
-
-                if not partner.data:
-                    continue
-
-                context = "\n\n".join(chunks)
-
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided partner documentation."
-                                )
-                            },
-                            *history,
-                            {
-                                "role": "user",
-                                "content": f"""
-Question:
-{message}
-
-Partner documentation:
-{context}
-
-Provide a clear answer using only this information.
-"""
-                            }
-                        ],
-                        temperature=0.2
-                    )
-
-                    combined_answer = response.choices[0].message.content.strip()
-
-                except Exception as e:
-                    print("PARTNER DOC SYNTHESIS ERROR:", e)
-                    combined_answer = context
-
-                formatted_answers.append({
-                    "partner_name": partner.data["badge_label"],
-                    "answer": combined_answer
-                })
-
-            if formatted_answers:
-                return {
-                    "answers": formatted_answers,
-                    "source": "db_semantic_multi",
-                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                    "requires_auth": False,
-                    "new_title": None
-                }
 
     # =====================================================
     # 5️⃣ YACHTING FALLBACK
