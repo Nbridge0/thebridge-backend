@@ -299,6 +299,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     else:
        history = get_chat_history(chat_id)
 
+    print("HISTORY DEBUG:", history)
+
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
