@@ -203,10 +203,10 @@ def ask_openai(question: str) -> str:
 
 def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str:
 
-
-    if chat_id:
+    if not chat_id:
+        history = history or []
+    else:
         history = get_chat_history(chat_id)
-
 
 
     messages = [
@@ -296,6 +296,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # ✅ ALWAYS TRUST FRONTEND HISTORY FOR GUESTS
     if not chat_id:
        history = history or []
+    else:
+       history = get_chat_history(chat_id)
 
     try:
         embedding = client.embeddings.create(
@@ -328,9 +330,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             answers = [row["answer"] for row in bridge_qa]
             combined_context = "\n\n".join(answers)
 
-            
-            if chat_id:
-                history = get_chat_history(chat_id)
+         
            
             try:
                 response = client.chat.completions.create(
@@ -435,8 +435,7 @@ Remove duplicates and keep structure clean.
             context = "\n\n".join([row["content"] for row in bridge_results])
 
 
-            if chat_id:
-               history = get_chat_history(chat_id)
+        
 
             try:
                 response = client.chat.completions.create(
@@ -497,8 +496,7 @@ Provide a clear and complete answer using only this information.
             semantic_results = []
 
         if semantic_results:
-            if chat_id:
-                history = get_chat_history(chat_id)
+    
  
             grouped = {}
 
@@ -590,8 +588,6 @@ Provide a clear answer using only this information.
     # 6️⃣ AI RESPONSE
     # =====================================================
 
-    if chat_id:
-        history = get_chat_history(chat_id)
  
     messages = [
         {
