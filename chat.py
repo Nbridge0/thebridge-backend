@@ -206,8 +206,6 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 
     if chat_id:
         history = get_chat_history(chat_id)
-    else:
-        history = history or []
 
 
 
@@ -295,6 +293,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     user_norm = normalize(message)
 
+    # ✅ ALWAYS TRUST FRONTEND HISTORY FOR GUESTS
+    if not chat_id:
+       history = history or []
+
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
@@ -329,9 +331,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             
             if chat_id:
                 history = get_chat_history(chat_id)
-            else:
-                history = history or []
-
+           
             try:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -437,8 +437,6 @@ Remove duplicates and keep structure clean.
 
             if chat_id:
                history = get_chat_history(chat_id)
-            else:
-                history = history or []
 
             try:
                 response = client.chat.completions.create(
@@ -501,9 +499,7 @@ Provide a clear and complete answer using only this information.
         if semantic_results:
             if chat_id:
                 history = get_chat_history(chat_id)
-            else:
-                history = history or []
-
+ 
             grouped = {}
 
             for row in semantic_results:
@@ -596,9 +592,7 @@ Provide a clear answer using only this information.
 
     if chat_id:
         history = get_chat_history(chat_id)
-    else:
-        history = history or []
-
+ 
     messages = [
         {
             "role": "system",
