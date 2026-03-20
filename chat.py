@@ -319,8 +319,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_bridge_qa",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.75,
-                    "match_count": 3
+                    "match_threshold": 0.65,
+                    "match_count": 5
                 }
             ).execute().data
         except Exception as e:
@@ -328,6 +328,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_qa = []
 
         if bridge_qa:
+            print("🔥 BRIDGE QA RESULTS:", bridge_qa)
 
             answers = [row["answer"] for row in bridge_qa]
 
@@ -353,10 +354,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                                 "- You MUST NOT contradict it\n\n"
 
                                 "HOW TO ANSWER:\n"
-                                "1. Start with a clear, direct definition of the topic\n"
-                                "2. Then expand by combining ALL useful points from the database\n"
-                                "3. Add structure if helpful (short paragraphs or sections)\n"
-                                "4. Include additional context, explanation, or examples IF they align with the database\n\n"
+                                "YOU MUST structure the answer like this:\n\n"
+
+                                "1. Definition (1–2 sentences)\n"
+                                "2. What it includes / covers\n"
+                                "3. Why it matters in practice\n"
+                                "4. Additional relevant details from the database\n\n"
+
+                                "The answer MUST contain multiple parts if the database provides enough information.\n"
 
                                 "GOAL:\n"
                                 "The answer should feel COMPLETE and WELL-ROUNDED — not just a single sentence.\n\n"
