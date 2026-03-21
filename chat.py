@@ -320,14 +320,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.75,
-                    "match_count": 1
+                    "match_count": 5
                 }
             ).execute().data
         except Exception as e:
             print("PARTNER QA ERROR:", e)
             qa_results = []
 
-        if qa_results:
+        if qa_results and len(qa_results) >= 3:
             return {
                 "answers": [
                     {
@@ -401,11 +401,15 @@ Question:
 Partner documentation:
 {context}
 
-Provide a clear answer using only this information.
+Provide a detailed, structured answer using ALL relevant information.
+- Combine multiple pieces of information
+- Expand the explanation clearly
+- Do NOT give a single sentence
+- Make the answer informative and complete
 """
                             }
                         ],
-                        temperature=0.2
+                        temperature=0.4
                     )
 
                     combined_answer = response.choices[0].message.content.strip()
@@ -580,10 +584,7 @@ Provide a clear and complete answer using only this information.
                     temperature=0.2
                 )
 
-                combined_answer = (
-                    response.choices[0].message.content.strip()
-                    + f"\n\n— Source: {partner.data['badge_label']}"
-                )
+                combined_answer = response.choices[0].message.content.strip()
 
             except Exception as e:
                 print("DOC AI ERROR:", e)
