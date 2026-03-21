@@ -580,7 +580,10 @@ Provide a clear and complete answer using only this information.
                     temperature=0.2
                 )
 
-                combined_answer = response.choices[0].message.content.strip()
+                combined_answer = (
+                    response.choices[0].message.content.strip()
+                    + f"\n\n— Source: {partner.data['badge_label']}"
+                )
 
             except Exception as e:
                 print("DOC AI ERROR:", e)
