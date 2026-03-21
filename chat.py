@@ -388,7 +388,26 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                             {
                                 "role": "system",
                                 "content": (
-                                    BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided partner documentation."
+                                     BASE_SYSTEM_PROMPT + """
+
+                                You are answering strictly using partner knowledge from: {partner.data["badge_label"]}.
+
+
+                                RULES:
+                                - ONLY use the provided partner documentation
+                                - DO NOT add external knowledge
+                                - DO NOT invent new ideas
+                                - DO NOT expand beyond what is written
+                                - You MAY rephrase and combine information
+                                - You MUST include ALL relevant points from the                                                 documentation
+                                - Ignore irrelevant chunks
+
+                                GOAL:
+                                - Combine multiple pieces of information into one clear                                         answer
+                                - Keep it complete but grounded strictly in the data
+
+                                If the documentation is limited, keep the answer limited.
+                                """
                                 )
                             },
                             *history,
