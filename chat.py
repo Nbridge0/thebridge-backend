@@ -319,6 +319,32 @@ def filter_chunks(chunks, question):
     scored.sort(reverse=True)
     return [c for _, c in scored[:2]]
 
+def remove_redundant_prefixes(text: str) -> str:
+    lines = text.split("\n\n")
+    cleaned = []
+
+    first_line = True
+
+    for line in lines:
+        words = line.split()
+
+        # detect repeated prefix (first 3–5 words)
+        if not first_line and len(words) > 5:
+            prefix = " ".join(words[:5]).lower()
+
+            # compare with previous line prefix
+            prev_words = cleaned[-1].split() if cleaned else []
+            prev_prefix = " ".join(prev_words[:5]).lower() if prev_words else ""
+
+            if prefix == prev_prefix:
+                # remove prefix
+                line = " ".join(words[5:])
+
+        cleaned.append(line)
+        first_line = False
+
+    return "\n\n".join(cleaned)
+
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
