@@ -411,8 +411,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if bridge_qa:
             chunks = [row["answer"] for row in bridge_qa]
             cleaned = clean_chunks(chunks)
-            filtered = filter_chunks(cleaned, message)
-            combined_answer = filtered[0] if filtered else ""
+            combined_answer = "\n\n".join(cleaned)
             combined_answer = remove_redundant_prefixes(combined_answer)
             combined_answer = adjust_plurality(combined_answer, message)
             return {
@@ -471,8 +470,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if bridge_results:
             chunks = [row["content"] for row in bridge_results]
             cleaned = clean_chunks(chunks)
-            filtered = filter_chunks(cleaned, message)
-            combined_answer = filtered[0] if filtered else ""
+            combined_answer = "\n\n".join(cleaned)
 
             return {
                 "answer": combined_answer,
@@ -519,10 +517,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 if not partner.data:
                     continue
 
-                cleaned = clean_chunks(chunks)
-                filtered = filter_chunks(cleaned, message)
-                combined_answer = filtered[0] if filtered else ""
-
+               cleaned = clean_chunks(chunks)
+               combined_answer = "\n\n".join(cleaned)
+            
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
                     "answer": combined_answer
