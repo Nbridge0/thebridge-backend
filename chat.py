@@ -328,23 +328,16 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_qa = []
 
         if bridge_qa:
-            answers = [row["answer"] for row in bridge_qa]
-
-            # ✅ return top match only (recommended)
-
-            answers = [row["answer"] for row in bridge_qa]
-
             formatted_answers = [
-                 {
-                      "partner_name": "TheBridge",
-                      "answer": a
-                 }
-                 for a in answers
+                {
+                    "partner_name": "TheBridge",
+                    "answer": row["answer"]
+                }
+                for row in bridge_qa
             ]
 
-
             return {
-                "answer": "formatted_answers",
+                "answers": formatted_answers,
                 "source": "bridge_semantic_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -353,7 +346,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (ALREADY RAW ✅)
+    # 2️⃣ PARTNER QA (RAW ONLY ✅)
     # =====================================================
     if embedding:
         try:
@@ -378,6 +371,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     }
                 ],
                 "source": "partner_qa",
+                "badge": qa_results[0]["partner_name"],
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
@@ -401,16 +395,16 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_results = []
 
         if bridge_results:
-            formatted_answer = [
+            formatted_answers = [
                 {
-                     "partner_name": "TheBridge",
-                     "answer": row["content"],
+                    "partner_name": "TheBridge",
+                    "answer": row["content"]
                 }
-                 for row in bridge_results
+                for row in bridge_results
             ]
 
             return {
-                "answer": "formatted_answers",
+                "answers": formatted_answers,
                 "source": "bridge_docs_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -438,7 +432,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if semantic_results:
 
             grouped = {}
-
             for row in semantic_results:
                 pid = row["partner_id"]
                 grouped.setdefault(pid, []).append(row["content"])
@@ -446,7 +439,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             formatted_answers = []
 
             for partner_id, chunks in grouped.items():
-
                 partner = supabase_admin.table("partners") \
                     .select("badge_label") \
                     .eq("id", partner_id) \
@@ -458,18 +450,15 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 for chunk in chunks:
                     formatted_answers.append({
-                         "partner_name": partner.data["badge_label"],
-                         "answer": chunk
+                        "partner_name": partner.data["badge_label"],
+                        "answer": chunk
                     })
-                formatted_answers.append({
-                    "partner_name": partner.data["badge_label"],
-                    "answer": combined_answer
-                })
 
             if formatted_answers:
                 return {
                     "answers": formatted_answers,
                     "source": "partner_docs_raw",
+                    "badge": "Partners",
                     "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                     "requires_auth": False,
                     "new_title": None
@@ -494,7 +483,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE (ONLY HERE ✅)
+    # 6️⃣ AI RESPONSE (ONLY IF NO DB MATCH ✅)
     # =====================================================
     messages = [
         {
@@ -516,7 +505,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             messages=messages,
             temperature=0.7
         )
-
         answer = response.choices[0].message.content.strip()
 
     except Exception as e:
@@ -533,7 +521,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             existing_messages = get_chat_history(chat_id)
 
             if len(existing_messages) <= 1:
-
                 title_resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
