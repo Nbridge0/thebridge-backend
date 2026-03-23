@@ -331,10 +331,20 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             answers = [row["answer"] for row in bridge_qa]
 
             # ✅ return top match only (recommended)
-            final_answer = answers[0]
+
+            answers = [row["answer"] for row in bridge_qa]
+
+            formatted_answers = [
+                 {
+                      "partner_name": "TheBridge",
+                      "answer": a
+                 }
+                 for a in answers
+            ]
+
 
             return {
-                "answer": final_answer,
+                "answer": "formatted_answers",
                 "source": "bridge_semantic_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -391,10 +401,16 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_results = []
 
         if bridge_results:
-            combined_answer = "\n\n".join([row["content"] for row in bridge_results])
+            formatted_answer = [
+                {
+                     "partner_name": "TheBridge",
+                     "answer": row["content"],
+                }
+                 for row in bridge_results
+            ]
 
             return {
-                "answer": combined_answer,
+                "answer": "formatted_answers",
                 "source": "bridge_docs_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -440,11 +456,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 if not partner.data:
                     continue
 
-                context = "\n\n".join(chunks)
-
-                # ✅ RAW (no AI)
-                combined_answer = context
-
+                for chunk in chunks:
+                    formatted_answers.append({
+                         "partner_name": partner.data["badge_label"],
+                         "answer": chunk
+                    })
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
                     "answer": combined_answer
