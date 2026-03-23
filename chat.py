@@ -311,7 +311,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (RAW ONLY ✅)
+    # 1️⃣ THEBRIDGE QA (COMBINED RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -328,16 +328,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_qa = []
 
         if bridge_qa:
-            formatted_answers = [
-                {
-                    "partner_name": "TheBridge",
-                    "answer": row["answer"]
-                }
-                for row in bridge_qa
-            ]
+            combined_answer = "\n\n".join([
+                row["answer"] for row in bridge_qa
+            ])
 
             return {
-                "answers": formatted_answers,
+                "answer": combined_answer,
                 "source": "bridge_semantic_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -346,7 +342,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (RAW ONLY ✅)
+    # 2️⃣ PARTNER QA (RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -364,12 +360,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
         if qa_results:
             return {
-                "answers": [
-                    {
-                        "partner_name": qa_results[0]["partner_name"],
-                        "answer": qa_results[0]["answer"]
-                    }
-                ],
+                "answer": qa_results[0]["answer"],
                 "source": "partner_qa",
                 "badge": qa_results[0]["partner_name"],
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -378,7 +369,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (RAW ONLY ✅)
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (COMBINED RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -395,16 +386,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_results = []
 
         if bridge_results:
-            formatted_answers = [
-                {
-                    "partner_name": "TheBridge",
-                    "answer": row["content"]
-                }
-                for row in bridge_results
-            ]
+            combined_answer = "\n\n".join([
+                row["content"] for row in bridge_results
+            ])
 
             return {
-                "answers": formatted_answers,
+                "answer": combined_answer,
                 "source": "bridge_docs_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -413,7 +400,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH (RAW ONLY ✅)
+    # 4️⃣ PARTNER DOCUMENT SEARCH (ONE BOX PER PARTNER ✅)
     # =====================================================
     if embedding:
         try:
@@ -448,11 +435,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 if not partner.data:
                     continue
 
-                for chunk in chunks:
-                    formatted_answers.append({
-                        "partner_name": partner.data["badge_label"],
-                        "answer": chunk
-                    })
+                combined_answer = "\n\n".join(chunks)
+
+                formatted_answers.append({
+                    "partner_name": partner.data["badge_label"],
+                    "answer": combined_answer
+                })
 
             if formatted_answers:
                 return {
