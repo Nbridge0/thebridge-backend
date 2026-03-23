@@ -308,6 +308,17 @@ def clean_chunks(chunks):
 
     return cleaned
 
+def filter_chunks(chunks, question):
+    keywords = question.lower().split()
+
+    scored = []
+    for c in chunks:
+        score = sum(1 for k in keywords if k in c.lower())
+        scored.append((score, c))
+
+    scored.sort(reverse=True)
+    return [c for _, c in scored[:2]]
+
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
@@ -340,7 +351,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.65,
-                    "match_count": 15
+                    "match_count": 5
                 }
             ).execute().data
         except Exception as e:
@@ -350,7 +361,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if bridge_qa:
             chunks = [row["answer"] for row in bridge_qa]
             cleaned = clean_chunks(chunks)
-            combined_answer = "\n\n".join(cleaned)
+            filtered = filter_chunks(cleaned, message)
+            combined_answer = "\n\n".join(filtered)
             return {
                 "answer": combined_answer,
                 "source": "bridge_semantic_raw",
