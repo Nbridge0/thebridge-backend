@@ -338,11 +338,17 @@ def filter_chunks(chunks, question):
     scored = []
     for c in chunks:
         score = sum(1 for k in keywords if k in c.lower())
+
+        # 🔥 BOOST "WHY / IMPORTANCE" CONTENT
+        if any(w in question.lower() for w in ["why", "important"]):
+            if any(w in c.lower() for w in ["important", "because", "helps", "ensures", "critical", "benefit"]):
+                score += 3
+
         scored.append((score, c))
 
     scored.sort(reverse=True)
-    return [c for _, c in scored[:2]]
-
+    return [c for _, c in scored[:5]]
+    
 def remove_redundant_prefixes(text: str) -> str:
     lines = text.split("\n\n")
     cleaned = []
