@@ -149,6 +149,30 @@ def semantic_bridge_match(question: str):
 
     return resp.data or []
 
+def adjust_plurality(text: str, question: str) -> str:
+    q_words = question.lower().split()
+
+    # detect plural (simple heuristic: any word ending in "s")
+    is_plural = any(
+        word.endswith("s") and len(word) > 3
+        for word in q_words
+    )
+
+    if not is_plural:
+        return text
+
+    replacements = {
+        "A yacht must": "Yachts must",
+        "A yacht crew must": "Yacht crews must",
+        "A yacht": "Yachts",
+        "The yacht": "Yachts",
+    }
+
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+
+    return text
+
 # -------------------------------
 # EMAIL (RESEND)
 # -------------------------------
@@ -388,7 +412,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["answer"] for row in bridge_qa]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
-            combined_answer = "\n\n".join(filtered)
+            combined_answer = filtered[0] if filtered else ""
+            combined_answer = remove_redundant_prefixes(combined_answer)
+            combined_answer = adjust_plurality(combined_answer, message)
             return {
                 "answer": combined_answer,
                 "source": "bridge_semantic_raw",
