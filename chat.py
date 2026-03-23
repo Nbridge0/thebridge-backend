@@ -517,8 +517,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 if not partner.data:
                     continue
 
-               cleaned = clean_chunks(chunks)
-               combined_answer = "\n\n".join(cleaned)
+                cleaned = clean_chunks(chunks)
+                combined_answer = "\n\n".join(cleaned)
             
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
