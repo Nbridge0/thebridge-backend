@@ -293,7 +293,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     user_norm = normalize(message)
 
-    # ✅ ALWAYS TRUST FRONTEND HISTORY FOR GUESTS
+    # -------------------------
+    # HISTORY
+    # -------------------------
     if not chat_id:
         history = history or []
     else:
@@ -301,6 +303,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
 
+    # -------------------------
+    # EMBEDDING
+    # -------------------------
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
@@ -311,7 +316,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1 PARTNER QA
+    # 1️⃣ PARTNER QA
     # =====================================================
     if embedding:
         try:
@@ -341,8 +346,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "new_title": None
             }
 
-        # =====================================================
-    # 2 PARTNER DOCUMENT SEARCH
+    # =====================================================
+    # 2️⃣ PARTNER DOCUMENT SEARCH (🔥 FIXED)
     # =====================================================
     if embedding:
         try:
@@ -350,112 +355,69 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_chunks",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.72,
-                    "match_count": 8
+                    "match_threshold": 0.6,
+                    "match_count": 25
                 }
-            ).execute().data
+            ).execute().data or []
+
+            keyword_results = supabase_admin.table("partner_chunks") \
+                .select("content") \
+                .or_(
+                    "content.ilike.%fls%,"
+                    "content.ilike.%sonar%,"
+                    "content.ilike.%ice%,"
+                    "content.ilike.%hazard%,"
+                    "content.ilike.%obstruction%"
+                ) \
+                .execute().data or []
+
+            all_chunks = {c["content"]: c for c in (semantic_results + keyword_results)}.values()
+
         except Exception as e:
             print("PARTNER DOC ERROR:", e)
-            semantic_results = []
+            all_chunks = []
 
-        if semantic_results:
+        if all_chunks:
 
-            grouped = {}
+            context = "\n\n".join([c["content"] for c in all_chunks])
 
-            for row in semantic_results:
-                pid = row["partner_id"]
-                grouped.setdefault(pid, []).append(row["content"])
+            # 🔥 SELECT RELEVANT CHUNKS
+            selection_prompt = f"""
+Question: {message}
 
-            formatted_answers = []
+Below are database sentences:
 
-            for partner_id, chunks in grouped.items():
-
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", partner_id) \
-                    .single() \
-                    .execute()
-
-                if not partner.data:
-                    continue
-
-                context = "\n\n".join(chunks)
-
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                     BASE_SYSTEM_PROMPT + """
-
-                                You are answering strictly using partner knowledge from: {partner.data["badge_label"]}.
-
-
-                                RULES:
-                                - ONLY use the provided partner documentation
-                                - DO NOT add external knowledge
-                                - DO NOT invent new ideas
-                                - DO NOT expand beyond what is written
-                                - You MAY rephrase and combine information
-                                - You MUST include ALL relevant points from the                                                 documentation
-                                - Ignore irrelevant chunks
-
-                                GOAL:
-                                - Combine multiple pieces of information into one clear                                         answer
-                                - Keep it complete but grounded strictly in the data
-
-                                If the documentation is limited, keep the answer limited.
-                                """
-                                )
-                            },
-                            *history,
-                            {
-                                "role": "user",
-                                "content": f"""
-Question:
-{message}
-
-Partner documentation:
 {context}
 
-Provide a detailed, structured answer using ALL relevant information.
-- Combine multiple pieces of information
-- Expand the explanation clearly
-- Do NOT give a single sentence
-- Make the answer informative and complete
+Select ALL sentences that are relevant to answering the question.
+
+RULES:
+- Return sentences EXACTLY as they are
+- DO NOT rewrite
+- DO NOT summarize
+- DO NOT miss any relevant sentence
+- DO NOT include irrelevant sentences
 """
-                            }
-                        ],
-                        temperature=0.4
-                    )
 
-                    combined_answer = response.choices[0].message.content.strip()
+            selection_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": selection_prompt}],
+                temperature=0
+            )
 
-                except Exception as e:
-                    print("PARTNER DOC SYNTHESIS ERROR:", e)
-                    combined_answer = context
+            selected_chunks =  selection_response.choices[0].message.content.strip()
 
-                formatted_answers.append({
-                    "partner_name": partner.data["badge_label"],
-                    "answer": combined_answer
-                })
-
-            if formatted_answers:
-                return {
-                    "answers": formatted_answers,
-                    "source": "db_semantic_multi",
-                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-
-
-    
+            combined_answer = selected_chunks
+            return {
+                "answer": combined_answer,
+                "source": "db_semantic_full",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
 
     # =====================================================
-    # 3 THEBRIDGE QA (ENRICHED WITH AI + MEMORY) ✅ UPDATED
+    # 3️⃣ THEBRIDGE QA
     # =====================================================
     if embedding:
         try:
@@ -472,11 +434,8 @@ Provide a detailed, structured answer using ALL relevant information.
             bridge_qa = []
 
         if bridge_qa:
-            print("🔥 BRIDGE QA RESULTS:", bridge_qa)
-
             answers = [row["answer"] for row in bridge_qa]
 
-            # ✅ BETTER STRUCTURED CONTEXT
             combined_context = "\n\n---\n\n".join([
                 f"Source {i+1}:\n{a}" for i, a in enumerate(answers)
             ])
@@ -485,39 +444,7 @@ Provide a detailed, structured answer using ALL relevant information.
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                BASE_SYSTEM_PROMPT +
-
-                                "\n\nYou are generating enriched knowledge answers from TheBridge database.\n\n"
-
-                                "CRITICAL RULES:\n"
-                                "- The database content is the SOURCE OF TRUTH\n"
-                                "- You MUST use ALL relevant information from it\n"
-                                "- You MUST NOT contradict it\n\n"
-
-                                "HOW TO ANSWER:\n"
-                                "YOU MUST structure the answer like this:\n\n"
-
-                                "1. Definition (1–2 sentences)\n"
-                                "2. What it includes / covers\n"
-                                "3. Why it matters in practice\n"
-                                "4. Additional relevant details from the database\n\n"
-
-                                "The answer MUST contain multiple parts if the database provides enough information.\n"
-
-                                "GOAL:\n"
-                                "The answer should feel COMPLETE and WELL-ROUNDED — not just a single sentence.\n\n"
-
-                                "DO NOT:\n"
-                                "- Just repeat one answer\n"
-                                "- Leave useful database details unused\n"
-                                "- Be overly short if more info exists\n\n"
-
-                                "If multiple database answers exist, intelligently merge them into one coherent explanation."
-                            )
-                        },
+                        {"role": "system", "content": BASE_SYSTEM_PROMPT},
                         *history,
                         {
                             "role": "user",
@@ -527,14 +454,6 @@ User question:
 
 Database answers:
 {combined_context}
-
-Create a COMPLETE, enriched answer.
-
-- Start with a clear definition
-- Then expand using ALL relevant information from the database
-- Merge overlapping ideas cleanly
-- Avoid repetition
-- Make the answer feel structured and comprehensive
 """
                         }
                     ],
@@ -544,21 +463,19 @@ Create a COMPLETE, enriched answer.
                 final_answer = response.choices[0].message.content.strip()
 
             except Exception as e:
-                print("BRIDGE QA ENRICH ERROR:", e)
+                print("BRIDGE QA ERROR:", e)
                 final_answer = combined_context
 
             return {
                 "answer": final_answer,
                 "source": "bridge_semantic_enriched",
-                "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
-
     # =====================================================
-    # 4 THEBRIDGE DOCUMENT SEARCH
+    # 4️⃣ THEBRIDGE DOCS
     # =====================================================
     if embedding:
         try:
@@ -575,49 +492,15 @@ Create a COMPLETE, enriched answer.
             bridge_results = []
 
         if bridge_results:
-
-            context = "\n\n".join([row["content"] for row in bridge_results])
-
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided documentation."
-                        },
-                        *history,
-                        {
-                            "role": "user",
-                            "content": f"""
-Question:
-{message}
-
-Documentation:
-{context}
-
-Provide a clear and complete answer using only this information.
-"""
-                        }
-                    ],
-                    temperature=0.2
-                )
-
-                combined_answer = response.choices[0].message.content.strip()
-
-            except Exception as e:
-                print("DOC AI ERROR:", e)
-                combined_answer = context
+            context = "\n\n".join([r["content"] for r in bridge_results])
 
             return {
-                "answer": combined_answer,
+                "answer": context,
                 "source": "bridge_docs",
-                "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
-
 
     # =====================================================
     # 5️⃣ YACHTING FALLBACK
@@ -638,26 +521,16 @@ Provide a clear and complete answer using only this information.
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE
+    # 6️⃣ OPENAI FALLBACK
     # =====================================================
-    messages = [
-        {
-            "role": "system",
-            "content": BASE_SYSTEM_PROMPT
-        }
-    ]
-
-    messages.extend(history)
-
-    messages.append({
-        "role": "user",
-        "content": message
-    })
-
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=messages,
+            messages=[
+                {"role": "system", "content": BASE_SYSTEM_PROMPT},
+                *history,
+                {"role": "user", "content": message}
+            ],
             temperature=0.7
         )
 
@@ -665,30 +538,21 @@ Provide a clear and complete answer using only this information.
 
     except Exception as e:
         print("OPENAI ERROR:", e)
-        answer = "⚠️ AI temporary error. Please try again."
+        answer = "⚠️ AI temporary error."
 
     # =====================================================
-    # 7️⃣ AUTO TITLE GENERATION
+    # 7️⃣ TITLE GENERATION
     # =====================================================
     new_title = None
 
     if chat_id:
         try:
-            existing_messages = get_chat_history(chat_id)
-
-            if len(existing_messages) <= 1:
-
+            if len(get_chat_history(chat_id)) <= 1:
                 title_resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": "Create a short 4-6 word title summarizing this topic."
-                        },
-                        {
-                            "role": "user",
-                            "content": message
-                        }
+                        {"role": "system", "content": "Create a short 4-6 word title"},
+                        {"role": "user", "content": message}
                     ],
                     temperature=0.3
                 )
