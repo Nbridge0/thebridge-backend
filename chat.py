@@ -293,7 +293,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     user_norm = normalize(message)
 
-    # ✅ ALWAYS TRUST FRONTEND HISTORY FOR GUESTS
+    # HISTORY
     if not chat_id:
         history = history or []
     else:
@@ -311,7 +311,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (ENRICHED WITH AI + MEMORY) ✅ UPDATED
+    # 1️⃣ THEBRIDGE QA (RAW ONLY ✅)
     # =====================================================
     if embedding:
         try:
@@ -328,84 +328,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_qa = []
 
         if bridge_qa:
-            print("🔥 BRIDGE QA RESULTS:", bridge_qa)
-
             answers = [row["answer"] for row in bridge_qa]
 
-            # ✅ BETTER STRUCTURED CONTEXT
-            combined_context = "\n\n---\n\n".join([
-                f"Source {i+1}:\n{a}" for i, a in enumerate(answers)
-            ])
-
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                BASE_SYSTEM_PROMPT +
-
-                                "\n\nYou are generating enriched knowledge answers from TheBridge database.\n\n"
-
-                                "CRITICAL RULES:\n"
-                                "- The database content is the SOURCE OF TRUTH\n"
-                                "- You MUST use ALL relevant information from it\n"
-                                "- You MUST NOT contradict it\n\n"
-
-                                "HOW TO ANSWER:\n"
-                                "YOU MUST structure the answer like this:\n\n"
-
-                                "1. Definition (1–2 sentences)\n"
-                                "2. What it includes / covers\n"
-                                "3. Why it matters in practice\n"
-                                "4. Additional relevant details from the database\n\n"
-
-                                "The answer MUST contain multiple parts if the database provides enough information.\n"
-
-                                "GOAL:\n"
-                                "The answer should feel COMPLETE and WELL-ROUNDED — not just a single sentence.\n\n"
-
-                                "DO NOT:\n"
-                                "- Just repeat one answer\n"
-                                "- Leave useful database details unused\n"
-                                "- Be overly short if more info exists\n\n"
-
-                                "If multiple database answers exist, intelligently merge them into one coherent explanation."
-                            )
-                        },
-                        *history,
-                        {
-                            "role": "user",
-                            "content": f"""
-User question:
-{message}
-
-Database answers:
-{combined_context}
-
-Create a COMPLETE, enriched answer.
-
-- Start with a clear definition
-- Then expand using ALL relevant information from the database
-- Merge overlapping ideas cleanly
-- Avoid repetition
-- Make the answer feel structured and comprehensive
-"""
-                        }
-                    ],
-                    temperature=0.4
-                )
-
-                final_answer = response.choices[0].message.content.strip()
-
-            except Exception as e:
-                print("BRIDGE QA ENRICH ERROR:", e)
-                final_answer = combined_context
+            # ✅ return top match only (recommended)
+            final_answer = answers[0]
 
             return {
                 "answer": final_answer,
-                "source": "bridge_semantic_enriched",
+                "source": "bridge_semantic_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
@@ -413,7 +343,7 @@ Create a COMPLETE, enriched answer.
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA
+    # 2️⃣ PARTNER QA (ALREADY RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -444,7 +374,7 @@ Create a COMPLETE, enriched answer.
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (RAW ONLY ✅)
     # =====================================================
     if embedding:
         try:
@@ -461,43 +391,11 @@ Create a COMPLETE, enriched answer.
             bridge_results = []
 
         if bridge_results:
-
-            context = "\n\n".join([row["content"] for row in bridge_results])
-
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided documentation."
-                        },
-                        *history,
-                        {
-                            "role": "user",
-                            "content": f"""
-Question:
-{message}
-
-Documentation:
-{context}
-
-Provide a clear and complete answer using only this information.
-"""
-                        }
-                    ],
-                    temperature=0.2
-                )
-
-                combined_answer = response.choices[0].message.content.strip()
-
-            except Exception as e:
-                print("DOC AI ERROR:", e)
-                combined_answer = context
+            combined_answer = "\n\n".join([row["content"] for row in bridge_results])
 
             return {
                 "answer": combined_answer,
-                "source": "bridge_docs",
+                "source": "bridge_docs_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
@@ -505,7 +403,7 @@ Provide a clear and complete answer using only this information.
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH
+    # 4️⃣ PARTNER DOCUMENT SEARCH (RAW ONLY ✅)
     # =====================================================
     if embedding:
         try:
@@ -544,38 +442,8 @@ Provide a clear and complete answer using only this information.
 
                 context = "\n\n".join(chunks)
 
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    BASE_SYSTEM_PROMPT + "\n\nAnswer ONLY using the provided partner documentation."
-                                )
-                            },
-                            *history,
-                            {
-                                "role": "user",
-                                "content": f"""
-Question:
-{message}
-
-Partner documentation:
-{context}
-
-Provide a clear answer using only this information.
-"""
-                            }
-                        ],
-                        temperature=0.2
-                    )
-
-                    combined_answer = response.choices[0].message.content.strip()
-
-                except Exception as e:
-                    print("PARTNER DOC SYNTHESIS ERROR:", e)
-                    combined_answer = context
+                # ✅ RAW (no AI)
+                combined_answer = context
 
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
@@ -585,7 +453,7 @@ Provide a clear answer using only this information.
             if formatted_answers:
                 return {
                     "answers": formatted_answers,
-                    "source": "db_semantic_multi",
+                    "source": "partner_docs_raw",
                     "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                     "requires_auth": False,
                     "new_title": None
@@ -610,7 +478,7 @@ Provide a clear answer using only this information.
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE
+    # 6️⃣ AI RESPONSE (ONLY HERE ✅)
     # =====================================================
     messages = [
         {
