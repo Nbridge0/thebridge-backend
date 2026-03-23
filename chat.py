@@ -288,6 +288,26 @@ def get_chat_history(chat_id: int, limit: int = 15):
         print("HISTORY ERROR:", e)
         return []
 
+def clean_chunks(chunks):
+    seen = set()
+    cleaned = []
+
+    for c in chunks:
+        c = c.strip()
+
+        # remove duplicates
+        if c.lower() in seen:
+            continue
+
+        # remove very short useless chunks
+        if len(c) < 40:
+            continue
+
+        seen.add(c.lower())
+        cleaned.append(c)
+
+    return cleaned
+
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
@@ -320,7 +340,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.65,
-                    "match_count": 5
+                    "match_count": 15
                 }
             ).execute().data
         except Exception as e:
@@ -328,10 +348,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_qa = []
 
         if bridge_qa:
-            combined_answer = "\n\n".join([
-                row["answer"] for row in bridge_qa
-            ])
-
+            chunks = [row["answer"] for row in bridge_qa]
+            cleaned = clean_chunks(chunks)
+            combined_answer = "\n\n".join(cleaned)
             return {
                 "answer": combined_answer,
                 "source": "bridge_semantic_raw",
@@ -386,9 +405,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             bridge_results = []
 
         if bridge_results:
-            combined_answer = "\n\n".join([
-                row["content"] for row in bridge_results
-            ])
+            chunks = [row["content"] for row in bridge_results]
+            cleaned = clean_chunks(chunks)
+            combined_answer = "\n\n".join(cleaned)
 
             return {
                 "answer": combined_answer,
@@ -435,7 +454,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 if not partner.data:
                     continue
 
-                combined_answer = "\n\n".join(chunks)
+                cleaned = clean_chunks(chunks)
+                combined_answer = "\n\n".join(cleaned)
 
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
