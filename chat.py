@@ -375,6 +375,47 @@ def remove_redundant_prefixes(text: str) -> str:
 
     return "\n\n".join(cleaned)
 
+def generate_contextual_answer(question: str, context_chunks: list, history: list):
+    context = "\n\n".join(context_chunks[:3])
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI.\n\n"
+                "Answer the user's question using the provided context.\n\n"
+
+                "RULES:\n"
+                "- If the question is YES/NO → start with Yes or No.\n"
+                "- Then explain clearly.\n"
+                "- Be natural and direct.\n"
+                "- Do NOT copy the context.\n"
+                "- Adapt the answer to the question.\n"
+            )
+        }
+    ]
+
+    messages.extend(history)
+
+    messages.append({
+        "role": "user",
+        "content": f"""
+Question:
+{question}
+
+Context:
+{context}
+"""
+    })
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.3
+    )
+
+    return response.choices[0].message.content.strip()
+
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
@@ -418,11 +459,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["answer"] for row in bridge_qa]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
-            combined_answer = "\n\n".join(filtered[:3])
-            combined_answer = remove_redundant_prefixes(combined_answer)
-            combined_answer = adjust_plurality(combined_answer, message)
+            filtered = [remove_redundant_prefixes(c) for c in filtered]
+            answer = generate_contextual_answer(message, filtered, history)
+            answer = adjust_plurality(answer, message)
             return {
-                "answer": combined_answer,
+                "answer": answer,
                 "source": "bridge_semantic_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -478,10 +519,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["content"] for row in bridge_results]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
-            combined_answer = "\n\n".join(filtered[:3])
+            answer = generate_contextual_answer(message, filtered, history)
 
             return {
-                "answer": combined_answer,
+                "answer": answer,
                 "source": "bridge_docs_raw",
                 "badge": "TheBridge",
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -527,11 +568,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
-                combined_answer = "\n\n".join(filtered[:3])
+                answer = generate_contextual_answer(message, filtered, history)
             
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
-                    "answer": combined_answer
+                    "answer": answer
                 })
 
             if formatted_answers:
