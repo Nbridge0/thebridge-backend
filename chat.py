@@ -439,7 +439,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (COMBINED RAW ✅)
+    # 1️⃣ THEBRIDGE QA
     # =====================================================
     if embedding:
         try:
@@ -460,8 +460,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
             filtered = [remove_redundant_prefixes(c) for c in filtered]
+
             answer = generate_contextual_answer(message, filtered, history)
             answer = adjust_plurality(answer, message)
+
             return {
                 "answer": answer,
                 "source": "bridge_semantic_raw",
@@ -472,7 +474,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (RAW ✅)
+    # 2️⃣ PARTNER QA (FIXED ✅)
     # =====================================================
     if embedding:
         try:
@@ -489,17 +491,28 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             qa_results = []
 
         if qa_results:
+            row = qa_results[0]
+
+            # 🔥 FETCH PARTNER BADGE (FIX)
+            partner = supabase_admin.table("partners") \
+                .select("badge_label") \
+                .eq("id", row["partner_id"]) \
+                .single() \
+                .execute()
+
+            badge = partner.data["badge_label"] if partner.data else "Partner"
+
             return {
-                "answer": qa_results[0]["answer"],
+                "answer": row["answer"],
                 "source": "partner_qa",
-                "badge": qa_results[0]["partner_name"],
+                "badge": badge,  # ✅ FIXED
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (COMBINED RAW ✅)
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
     # =====================================================
     if embedding:
         try:
@@ -519,6 +532,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["content"] for row in bridge_results]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
+
             answer = generate_contextual_answer(message, filtered, history)
 
             return {
@@ -531,7 +545,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH (ONE BOX PER PARTNER ✅)
+    # 4️⃣ PARTNER DOCUMENT SEARCH
     # =====================================================
     if embedding:
         try:
@@ -569,7 +583,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
                 answer = generate_contextual_answer(message, filtered, history)
-            
+
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
                     "answer": answer
@@ -604,7 +618,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE (ONLY IF NO DB MATCH ✅)
+    # 6️⃣ AI RESPONSE
     # =====================================================
     messages = [
         {
