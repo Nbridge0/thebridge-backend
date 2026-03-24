@@ -383,9 +383,11 @@ def chat_message(req: ChatRequest):
             req.user_email
         )
 
+
     return {
     "answer": answer,
     "source": source,
+    "badge": result.get("badge"),  # 🔥 ADD THIS
     "actions": actions,
     "requires_auth": requires_auth,
     "new_title": result.get("new_title")
