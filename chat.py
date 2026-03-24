@@ -474,7 +474,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (FIXED ✅)
+    # 2️⃣ PARTNER QA (FULLY FIXED ✅)
     # =====================================================
     if embedding:
         try:
@@ -493,19 +493,34 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if qa_results:
             row = qa_results[0]
 
-            # 🔥 FETCH PARTNER BADGE (FIX)
-            partner = supabase_admin.table("partners") \
-                .select("badge_label") \
-                .eq("id", row["partner_id"]) \
-                .single() \
-                .execute()
+            print("QA RESULT DEBUG:", row)
 
-            badge = partner.data["badge_label"] if partner.data else "Partner"
+            answer = row.get("answer")
+            if not answer:
+                raise Exception("Missing answer in partner_qa")
+
+            badge = "Partner"
+
+            try:
+                partner_id = row.get("partner_id")
+
+                if partner_id:
+                    partner = supabase_admin.table("partners") \
+                        .select("badge_label") \
+                        .eq("id", partner_id) \
+                        .single() \
+                        .execute()
+
+                    if partner.data and partner.data.get("badge_label"):
+                        badge = partner.data["badge_label"]
+
+            except Exception as e:
+                print("BADGE ERROR:", e)
 
             return {
-                "answer": row["answer"],
+                "answer": answer,
                 "source": "partner_qa",
-                "badge": badge,  # ✅ FIXED
+                "badge": badge,
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
@@ -571,23 +586,27 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             formatted_answers = []
 
             for partner_id, chunks in grouped.items():
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", partner_id) \
-                    .single() \
-                    .execute()
+                try:
+                    partner = supabase_admin.table("partners") \
+                        .select("badge_label") \
+                        .eq("id", partner_id) \
+                        .single() \
+                        .execute()
 
-                if not partner.data:
-                    continue
+                    if not partner.data:
+                        continue
 
-                cleaned = clean_chunks(chunks)
-                filtered = filter_chunks(cleaned, message)
-                answer = generate_contextual_answer(message, filtered, history)
+                    cleaned = clean_chunks(chunks)
+                    filtered = filter_chunks(cleaned, message)
+                    answer = generate_contextual_answer(message, filtered, history)
 
-                formatted_answers.append({
-                    "partner_name": partner.data["badge_label"],
-                    "answer": answer
-                })
+                    formatted_answers.append({
+                        "partner_name": partner.data["badge_label"],
+                        "answer": answer
+                    })
+
+                except Exception as e:
+                    print("PARTNER GROUP ERROR:", e)
 
             if formatted_answers:
                 return {
