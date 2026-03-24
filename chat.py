@@ -439,7 +439,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA
+    # 1️⃣ THEBRIDGE QA (COMBINED RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -460,10 +460,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
             filtered = [remove_redundant_prefixes(c) for c in filtered]
-
             answer = generate_contextual_answer(message, filtered, history)
             answer = adjust_plurality(answer, message)
-
             return {
                 "answer": answer,
                 "source": "bridge_semantic_raw",
@@ -474,7 +472,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (FULLY FIXED ✅)
+    # 2️⃣ PARTNER QA (RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -491,43 +489,17 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             qa_results = []
 
         if qa_results:
-            row = qa_results[0]
-
-
-            answer = row.get("answer")
-            if not answer:
-                raise Exception("Missing answer in partner_qa")
-
-            badge = "Partner"
-
-            try:
-                partner_id = row.get("partner_id")
-
-                if partner_id:
-                    partner = supabase_admin.table("partners") \
-                        .select("badge_label") \
-                        .eq("id", partner_id) \
-                        .single() \
-                        .execute()
-                    print("PARTNER RAW:", partner.data)
-
-                    if partner.data and len(partner.data) > 0:
-                        badge = partner.data[0]["badge_label"]
-
-            except Exception as e:
-                print("BADGE ERROR:", e)
-
             return {
-                "answer": answer,
+                "answer": qa_results[0]["answer"],
                 "source": "partner_qa",
-                "badge": badge,
+                "badge": qa_results[0]["partner_name"],
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (COMBINED RAW ✅)
     # =====================================================
     if embedding:
         try:
@@ -547,7 +519,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["content"] for row in bridge_results]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
-
             answer = generate_contextual_answer(message, filtered, history)
 
             return {
@@ -560,7 +531,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH
+    # 4️⃣ PARTNER DOCUMENT SEARCH (ONE BOX PER PARTNER ✅)
     # =====================================================
     if embedding:
         try:
@@ -586,27 +557,23 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             formatted_answers = []
 
             for partner_id, chunks in grouped.items():
-                try:
-                    partner = supabase_admin.table("partners") \
-                        .select("badge_label") \
-                        .eq("id", partner_id) \
-                        .single() \
-                        .execute()
+                partner = supabase_admin.table("partners") \
+                    .select("badge_label") \
+                    .eq("id", partner_id) \
+                    .single() \
+                    .execute()
 
-                    if not partner.data:
-                        continue
+                if not partner.data:
+                    continue
 
-                    cleaned = clean_chunks(chunks)
-                    filtered = filter_chunks(cleaned, message)
-                    answer = generate_contextual_answer(message, filtered, history)
-
-                    formatted_answers.append({
-                        "partner_name": partner.data["badge_label"],
-                        "answer": answer
-                    })
-
-                except Exception as e:
-                    print("PARTNER GROUP ERROR:", e)
+                cleaned = clean_chunks(chunks)
+                filtered = filter_chunks(cleaned, message)
+                answer = generate_contextual_answer(message, filtered, history)
+            
+                formatted_answers.append({
+                    "partner_name": partner.data["badge_label"],
+                    "answer": answer
+                })
 
             if formatted_answers:
                 return {
@@ -637,7 +604,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE
+    # 6️⃣ AI RESPONSE (ONLY IF NO DB MATCH ✅)
     # =====================================================
     messages = [
         {
