@@ -493,7 +493,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if qa_results:
             row = qa_results[0]
 
-            print("QA RESULT DEBUG:", row)
 
             answer = row.get("answer")
             if not answer:
@@ -510,9 +509,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                         .eq("id", partner_id) \
                         .single() \
                         .execute()
+                    print("PARTNER RAW:", partner.data)
 
-                    if partner.data and partner.data.get("badge_label"):
-                        badge = partner.data["badge_label"]
+                    if partner.data and len(partner.data) > 0:
+                        badge = partner.data[0]["badge_label"]
 
             except Exception as e:
                 print("BADGE ERROR:", e)
