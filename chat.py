@@ -277,8 +277,6 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 
     return r.choices[0].message.content.strip()
 
-# simple in-memory session (replace later with Redis if needed)
-TROUBLESHOOTING_SESSIONS = {}
 
 # -------------------------------
 # CORE CHAT LOGIC (UPDATED)
@@ -420,105 +418,6 @@ Context:
     return response.choices[0].message.content.strip()
 
 
-
-def detect_troubleshooting_intent(message: str) -> bool:
-    keywords = [
-        "not working", "issue", "problem", "fault",
-        "error", "not detecting", "not responding",
-        "troubleshoot", "debug"
-    ]
-
-    msg = message.lower()
-
-    return any(k in msg for k in keywords)
-
-def get_troubleshooting_steps():
-    try:
-        resp = supabase_admin.table("partner_troubleshooting") \
-            .select("*") \
-            .order("step_order") \
-            .execute()
-
-        return resp.data or []
-
-    except Exception as e:
-        print("TROUBLESHOOTING FETCH ERROR:", e)
-        return []
-
-def handle_troubleshooting(user_id: str, user_input: str):
-
-    session = TROUBLESHOOTING_SESSIONS.get(user_id)
-
-    # -------------------------------
-    # START SESSION
-    # -------------------------------
-    if not session:
-        steps = get_troubleshooting_steps()
-
-        if not steps:
-            return "⚠️ Troubleshooting data not available."
-
-        TROUBLESHOOTING_SESSIONS[user_id] = {
-            "step_index": 0,
-            "steps": steps
-        }
-
-        return (
-            "🛠 Starting troubleshooting process.\n"
-            "Please answer each question with yes or no.\n\n"
-            f"{steps[0]['question']}"
-        )
-
-    step_index = session["step_index"]
-    steps = session["steps"]
-
-    # -------------------------------
-    # END SESSION
-    # -------------------------------
-    if step_index >= len(steps):
-        TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-        return "✅ Troubleshooting complete."
-
-    step = steps[step_index]
-
-    # -------------------------------
-    # CLEAN USER INPUT
-    # -------------------------------
-    answer = user_input.strip().lower()
-
-    # -------------------------------
-    # YES FLOW
-    # -------------------------------
-    if answer in ["yes", "y"]:
-
-        session["step_index"] += 1
-
-        if session["step_index"] >= len(steps):
-            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-            return "✅ System check complete."
-
-        next_step = steps[session["step_index"]]
-
-        return (
-            f"{step['yes']}\n\n"
-            f"➡️ {next_step['question']}"
-        )
-
-    # -------------------------------
-    # NO FLOW
-    # -------------------------------
-    elif answer in ["no", "n"]:
-
-        return (
-            f"{step['no']}\n\n"
-            "Please fix this and reply 'yes' when done."
-        )
-
-    # -------------------------------
-    # INVALID INPUT
-    # -------------------------------
-    else:
-        return "Please answer with yes or no."
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
