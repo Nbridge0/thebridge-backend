@@ -8,6 +8,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from typing import Optional
+from troubleshooting import run_troubleshooting
 
 # -------------------------------
 # ENV
