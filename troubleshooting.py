@@ -82,6 +82,11 @@ def run_troubleshooting(user_id, message, supabase):
     step = steps[step_index]
     answer = msg.strip()
 
+    # 🚨 RESET SESSION if user breaks flow
+    if answer not in ["yes", "y", "no", "n"]:
+        TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+        return None
+
     if answer in ["yes", "y"]:
         session["step_index"] += 1
 
