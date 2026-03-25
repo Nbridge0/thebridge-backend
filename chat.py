@@ -523,7 +523,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     user_norm = normalize(message)
 
+    # =====================================================
     # HISTORY
+    # =====================================================
     if not chat_id:
         history = history or []
     else:
@@ -531,38 +533,17 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
 
-
     # =====================================================
-    # 0️⃣ TROUBLESHOOTING MODE ✅ (FIXED)
+    # 0️⃣ TROUBLESHOOTING (NEW CLEAN VERSION)
     # =====================================================
     user_id = str(chat_id) if chat_id else "guest_session"
 
-    # Exit troubleshooting manually
-    if "exit troubleshooting" in message.lower():
-        TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-        return {
-            "answer": "🛑 Troubleshooting session ended.",
-            "source": "troubleshooting",
-            "actions": [],
-            "requires_auth": False,
-            "new_title": None
-        }
+    troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
 
-    # Continue session
-    if user_id in TROUBLESHOOTING_SESSIONS:
+    if troubleshoot:
         return {
-            "answer": handle_troubleshooting(user_id, message),
-            "source": "troubleshooting",
-            "actions": [],
-            "requires_auth": False,
-            "new_title": None
-        }
-
-    # Start session
-    if detect_troubleshooting_intent(message):
-        return {
-            "answer": handle_troubleshooting(user_id, message),
-            "source": "troubleshooting",
+            "answer": troubleshoot["answer"],
+            "source": troubleshoot["source"],
             "actions": [],
             "requires_auth": False,
             "new_title": None
@@ -643,7 +624,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
+    # 3️⃣ THEBRIDGE DOCS
     # =====================================================
     if embedding:
         try:
@@ -676,7 +657,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH
+    # 4️⃣ PARTNER DOCS
     # =====================================================
     if embedding:
         try:
