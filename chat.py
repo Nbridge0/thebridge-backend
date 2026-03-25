@@ -444,6 +444,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         return {
             "answer": troubleshoot["answer"],
             "source": troubleshoot["source"],
+            "badge": troubleshoot.get("badge"),
             "actions": [],
             "requires_auth": False,
             "new_title": None

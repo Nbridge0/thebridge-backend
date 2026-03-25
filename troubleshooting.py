@@ -49,13 +49,16 @@ def run_troubleshooting(user_id, message, supabase):
 
         steps = resp.data or []
 
+        partner_name = steps[0].get("partner_name", "Partner")
+
         if not steps:
             return None
 
         TROUBLESHOOTING_SESSIONS[user_id] = {
             "step_index": 0,
             "steps": steps,
-            "system": system
+            "system": system,
+            "partner_name": partner_name
         }
 
         return {
@@ -63,7 +66,8 @@ def run_troubleshooting(user_id, message, supabase):
                 f"🛠 Starting {system.replace('_',' ').title()} troubleshooting.\n\n"
                 f"{steps[0]['question']}"
             ),
-            "source": "troubleshooting"
+            "source": "troubleshooting",
+            "badge": partner_name
         }
 
     # ---------------------------------------
@@ -101,16 +105,19 @@ def run_troubleshooting(user_id, message, supabase):
 
         return {
             "answer": f"{step['yes']}\n\n➡️ {next_step['question']}",
-            "source": "troubleshooting"
+            "source": "troubleshooting",
+            "badge": partner_name
         }
 
     elif answer in ["no", "n"]:
         return {
             "answer": f"{step['no']}\n\nPlease fix this and reply 'yes' when done.",
-            "source": "troubleshooting"
+            "source": "troubleshooting",
+            "badge": session.get("partner_name", "Partner")
         }
 
     return {
         "answer": "Please answer with yes or no.",
-        "source": "troubleshooting"
+        "source": "troubleshooting",
+        "badge": session.get("partner_name", "Partner")
     }
