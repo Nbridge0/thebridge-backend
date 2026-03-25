@@ -276,6 +276,8 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 
     return r.choices[0].message.content.strip()
 
+# simple in-memory session (replace later with Redis if needed)
+TROUBLESHOOTING_SESSIONS = {}
 
 # -------------------------------
 # CORE CHAT LOGIC (UPDATED)
@@ -417,6 +419,106 @@ Context:
     return response.choices[0].message.content.strip()
 
 
+
+def detect_troubleshooting_intent(message: str) -> bool:
+    keywords = [
+        "not working", "issue", "problem", "fault",
+        "error", "not detecting", "not responding",
+        "troubleshoot", "debug"
+    ]
+
+    msg = message.lower()
+
+    return any(k in msg for k in keywords)
+
+def get_troubleshooting_steps():
+    try:
+        resp = supabase_admin.table("partner_troubleshooting") \
+            .select("*") \
+            .order("step_order") \
+            .execute()
+
+        return resp.data or []
+
+    except Exception as e:
+        print("TROUBLESHOOTING FETCH ERROR:", e)
+        return []
+
+def handle_troubleshooting(user_id: str, user_input: str):
+
+    session = TROUBLESHOOTING_SESSIONS.get(user_id)
+
+    # -------------------------------
+    # START SESSION
+    # -------------------------------
+    if not session:
+        steps = get_troubleshooting_steps()
+
+        if not steps:
+            return "⚠️ Troubleshooting data not available."
+
+        TROUBLESHOOTING_SESSIONS[user_id] = {
+            "step_index": 0,
+            "steps": steps
+        }
+
+        return (
+            "🛠 Starting troubleshooting process.\n"
+            "Please answer each question with yes or no.\n\n"
+            f"{steps[0]['question']}"
+        )
+
+    step_index = session["step_index"]
+    steps = session["steps"]
+
+    # -------------------------------
+    # END SESSION
+    # -------------------------------
+    if step_index >= len(steps):
+        TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+        return "✅ Troubleshooting complete."
+
+    step = steps[step_index]
+
+    # -------------------------------
+    # CLEAN USER INPUT
+    # -------------------------------
+    answer = user_input.strip().lower()
+
+    # -------------------------------
+    # YES FLOW
+    # -------------------------------
+    if answer in ["yes", "y"]:
+
+        session["step_index"] += 1
+
+        if session["step_index"] >= len(steps):
+            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+            return "✅ System check complete."
+
+        next_step = steps[session["step_index"]]
+
+        return (
+            f"{step['yes']}\n\n"
+            f"➡️ {next_step['question']}"
+        )
+
+    # -------------------------------
+    # NO FLOW
+    # -------------------------------
+    elif answer in ["no", "n"]:
+
+        return (
+            f"{step['no']}\n\n"
+            "Please fix this and reply 'yes' when done."
+        )
+
+    # -------------------------------
+    # INVALID INPUT
+    # -------------------------------
+    else:
+        return "Please answer with yes or no."
+
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -429,6 +531,46 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
 
+
+    # =====================================================
+    # 0️⃣ TROUBLESHOOTING MODE ✅ (FIXED)
+    # =====================================================
+    user_id = str(chat_id) if chat_id else "guest_session"
+
+    # Exit troubleshooting manually
+    if "exit troubleshooting" in message.lower():
+        TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+        return {
+            "answer": "🛑 Troubleshooting session ended.",
+            "source": "troubleshooting",
+            "actions": [],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    # Continue session
+    if user_id in TROUBLESHOOTING_SESSIONS:
+        return {
+            "answer": handle_troubleshooting(user_id, message),
+            "source": "troubleshooting",
+            "actions": [],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    # Start session
+    if detect_troubleshooting_intent(message):
+        return {
+            "answer": handle_troubleshooting(user_id, message),
+            "source": "troubleshooting",
+            "actions": [],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    # =====================================================
+    # EMBEDDING
+    # =====================================================
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
@@ -439,7 +581,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA (COMBINED RAW ✅)
+    # 1️⃣ THEBRIDGE QA
     # =====================================================
     if embedding:
         try:
@@ -460,8 +602,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
             filtered = [remove_redundant_prefixes(c) for c in filtered]
+
             answer = generate_contextual_answer(message, filtered, history)
             answer = adjust_plurality(answer, message)
+
             return {
                 "answer": answer,
                 "source": "bridge_semantic_raw",
@@ -472,7 +616,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (RAW ✅)
+    # 2️⃣ PARTNER QA
     # =====================================================
     if embedding:
         try:
@@ -499,7 +643,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 3️⃣ THEBRIDGE DOCUMENT SEARCH (COMBINED RAW ✅)
+    # 3️⃣ THEBRIDGE DOCUMENT SEARCH
     # =====================================================
     if embedding:
         try:
@@ -519,6 +663,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             chunks = [row["content"] for row in bridge_results]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
+
             answer = generate_contextual_answer(message, filtered, history)
 
             return {
@@ -531,7 +676,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 4️⃣ PARTNER DOCUMENT SEARCH (ONE BOX PER PARTNER ✅)
+    # 4️⃣ PARTNER DOCUMENT SEARCH
     # =====================================================
     if embedding:
         try:
@@ -568,8 +713,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
+
                 answer = generate_contextual_answer(message, filtered, history)
-            
+
                 formatted_answers.append({
                     "partner_name": partner.data["badge_label"],
                     "answer": answer
@@ -604,21 +750,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         }
 
     # =====================================================
-    # 6️⃣ AI RESPONSE (ONLY IF NO DB MATCH ✅)
+    # 6️⃣ AI RESPONSE
     # =====================================================
-    messages = [
-        {
-            "role": "system",
-            "content": BASE_SYSTEM_PROMPT
-        }
-    ]
-
+    messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
-
-    messages.append({
-        "role": "user",
-        "content": message
-    })
+    messages.append({"role": "user", "content": message})
 
     try:
         response = client.chat.completions.create(
@@ -627,13 +763,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             temperature=0.7
         )
         answer = response.choices[0].message.content.strip()
-
     except Exception as e:
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
 
     # =====================================================
-    # 7️⃣ AUTO TITLE GENERATION
+    # 7️⃣ AUTO TITLE
     # =====================================================
     new_title = None
 
@@ -645,14 +780,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 title_resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": "Create a short 4-6 word title summarizing this topic."
-                        },
-                        {
-                            "role": "user",
-                            "content": message
-                        }
+                        {"role": "system", "content": "Create a short 4-6 word title summarizing this topic."},
+                        {"role": "user", "content": message}
                     ],
                     temperature=0.3
                 )
