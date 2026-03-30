@@ -434,7 +434,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     print("HISTORY DEBUG:", history)
 
     # =====================================================
-    # 0️⃣ TROUBLESHOOTING (NEW CLEAN VERSION)
+    # 0️⃣ TROUBLESHOOTING
     # =====================================================
     user_id = str(chat_id) if chat_id else "guest_session"
 
@@ -498,7 +498,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA
+    # 2️⃣ PARTNER QA (🔥 FIXED)
     # =====================================================
     if embedding:
         try:
@@ -515,10 +515,25 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             qa_results = []
 
         if qa_results:
+
+            partner_id = qa_results[0]["partner_id"]
+
+            # 🔥 FETCH PARTNER NAME FROM partners TABLE
+            partner = supabase_admin.table("partners") \
+                .select("badge_label") \
+                .eq("id", partner_id) \
+                .single() \
+                .execute()
+
+            partner_name = "Partner"
+
+            if partner.data and partner.data.get("badge_label"):
+                partner_name = partner.data["badge_label"]
+
             return {
                 "answer": qa_results[0]["answer"],
                 "source": "partner_qa",
-                "badge": qa_results[0]["partner_name"],
+                "badge": partner_name,
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
@@ -584,6 +599,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             formatted_answers = []
 
             for partner_id, chunks in grouped.items():
+
                 partner = supabase_admin.table("partners") \
                     .select("badge_label") \
                     .eq("id", partner_id) \
