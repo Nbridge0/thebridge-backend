@@ -434,7 +434,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     print("HISTORY DEBUG:", history)
 
     # =====================================================
-    # 0️⃣ TROUBLESHOOTING
+    # 0️⃣ TROUBLESHOOTING (NEW CLEAN VERSION)
     # =====================================================
     user_id = str(chat_id) if chat_id else "guest_session"
 
@@ -498,7 +498,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (🔥 FIXED)
+    # 2️⃣ PARTNER QA
     # =====================================================
     if embedding:
         try:
@@ -515,29 +515,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             qa_results = []
 
         if qa_results:
-
-            partner_id = qa_results[0]["partner_id"]
-
-            # 🔥 FETCH PARTNER NAME FROM partners TABLE
-            partner = supabase_admin.table("partners") \
-                .select("badge_label, name") \
-                .eq("id", partner_id) \
-                .single() \
-                .execute()
-
-            partner_name = "Partner"
-
-            if partner.data:
-                partner_name = (
-                    partner.data.get("badge_label")
-                    or partner.data.get("name")
-                    or "Partner"
-                )
-
             return {
                 "answer": qa_results[0]["answer"],
                 "source": "partner_qa",
-                "badge": partner_name,
+                "partner_name": qa_results[0]["partner_name"],
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
@@ -603,9 +584,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             formatted_answers = []
 
             for partner_id, chunks in grouped.items():
-
                 partner = supabase_admin.table("partners") \
-                    .select("badge_label, name") \
+                    .select("badge_label") \
                     .eq("id", partner_id) \
                     .single() \
                     .execute()
@@ -618,14 +598,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 answer = generate_contextual_answer(message, filtered, history)
 
-                partner_name = (
-                    partner.data.get("badge_label")
-                    or partner.data.get("name")
-                    or "Partner"
-                )
-
                 formatted_answers.append({
-                    "partner_name": partner_name,
+                    "partner_name": partner.data["badge_label"],
                     "answer": answer
                 })
 
