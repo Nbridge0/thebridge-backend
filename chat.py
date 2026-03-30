@@ -520,15 +520,19 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
             # 🔥 FETCH PARTNER NAME FROM partners TABLE
             partner = supabase_admin.table("partners") \
-                .select("badge_label") \
+                .select("badge_label, name") \
                 .eq("id", partner_id) \
                 .single() \
                 .execute()
 
             partner_name = "Partner"
 
-            if partner.data and partner.data.get("badge_label"):
-                partner_name = partner.data["badge_label"]
+            if partner.data:
+                partner_name = (
+                    partner.data.get("badge_label")
+                    or partner.data.get("name")
+                    or "Partner"
+                )
 
             return {
                 "answer": qa_results[0]["answer"],
@@ -601,7 +605,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             for partner_id, chunks in grouped.items():
 
                 partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
+                    .select("badge_label, name") \
                     .eq("id", partner_id) \
                     .single() \
                     .execute()
@@ -614,8 +618,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 answer = generate_contextual_answer(message, filtered, history)
 
+                partner_name = (
+                    partner.data.get("badge_label")
+                    or partner.data.get("name")
+                    or "Partner"
+                )
+
                 formatted_answers.append({
-                    "partner_name": partner.data["badge_label"],
+                    "partner_name": partner_name,
                     "answer": answer
                 })
 
