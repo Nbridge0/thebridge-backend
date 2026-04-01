@@ -531,7 +531,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             return {
                 "answer": row["answer"],
                 "source": "partner_qa",
-                "badge": partner_name,
+                "badge": row["partner_id"],
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
@@ -623,7 +623,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 return {
                     "answers": formatted_answers,
                     "source": "partner_docs_raw",
-                    "badge": "Partners",
+                    "badge": row["partner_id"],
                     "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                     "requires_auth": False,
                     "new_title": None
