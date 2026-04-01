@@ -422,15 +422,17 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     user_norm = normalize(message)
 
     # =====================================================
-    # 1️⃣ HISTORY
+    # HISTORY
     # =====================================================
     if not chat_id:
         history = history or []
     else:
         history = get_chat_history(chat_id)
 
+    print("HISTORY DEBUG:", history)
+
     # =====================================================
-    # 2️⃣ TROUBLESHOOTING
+    # 0️⃣ TROUBLESHOOTING
     # =====================================================
     user_id = str(chat_id) if chat_id else "guest_session"
 
@@ -447,7 +449,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         }
 
     # =====================================================
-    # 3️⃣ EMBEDDING
+    # EMBEDDING
     # =====================================================
     try:
         embedding = client.embeddings.create(
@@ -459,7 +461,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 4️⃣ THEBRIDGE QA
+    # 1️⃣ THEBRIDGE QA
     # =====================================================
     if embedding:
         try:
@@ -482,6 +484,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             filtered = [remove_redundant_prefixes(c) for c in filtered]
 
             answer = generate_contextual_answer(message, filtered, history)
+            answer = adjust_plurality(answer, message)
 
             return {
                 "answer": answer,
@@ -493,20 +496,18 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 5️⃣ PARTNER QA
+    # 2️⃣ PARTNER QA (FIXED)
     # =====================================================
     if embedding:
         try:
-            resp = supabase_admin.rpc(
+            qa_results = supabase_admin.rpc(
                 "match_partner_qa",
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.75,
                     "match_count": 1
                 }
-            ).execute()
-            print("PARTNER QA RAW:", resp)
-            qa_results = resp.data or []
+            ).execute().data
         except Exception as e:
             print("PARTNER QA ERROR:", e)
             qa_results = []
@@ -514,25 +515,21 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if qa_results:
             row = qa_results[0]
 
-            partner_name = "Partner"
-
+            # ✅ fetch partner name from partners table
             try:
-                partner_resp = supabase_admin.table("partners") \
-                    .select("badge_label") \
+                partner = supabase_admin.table("partners") \
+                    .select("name") \
                     .eq("id", row["partner_id"]) \
-                    .limit(1) \
+                    .single() \
                     .execute()
-                
-                if partner_resp.data:
-                    partner_name = partner_resp.data[0].get("badge_label", "Partner")
 
+                partner_name = partner.data["name"] if partner.data else "Partner"
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
-
-            answer = f"{row['answer']}\n\n({partner_name})"
+                partner_name = "Partner"
 
             return {
-                "answer": answer,
+                "answer": row["answer"],
                 "source": "partner_qa",
                 "badge": partner_name,
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -541,7 +538,117 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 6️⃣ FALLBACK AI
+    # 3️⃣ THEBRIDGE DOCS
+    # =====================================================
+    if embedding:
+        try:
+            bridge_results = supabase_admin.rpc(
+                "match_bridge_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.65,
+                    "match_count": 8
+                }
+            ).execute().data
+        except Exception as e:
+            print("BRIDGE DOC ERROR:", e)
+            bridge_results = []
+
+        if bridge_results:
+            chunks = [row["content"] for row in bridge_results]
+            cleaned = clean_chunks(chunks)
+            filtered = filter_chunks(cleaned, message)
+
+            answer = generate_contextual_answer(message, filtered, history)
+
+            return {
+                "answer": answer,
+                "source": "bridge_docs_raw",
+                "badge": "TheBridge",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # =====================================================
+    # 4️⃣ PARTNER DOCS (FIXED CONSISTENCY)
+    # =====================================================
+    if embedding:
+        try:
+            semantic_results = supabase_admin.rpc(
+                "match_partner_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.72,
+                    "match_count": 8
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER DOC ERROR:", e)
+            semantic_results = []
+
+        if semantic_results:
+
+            grouped = {}
+            for row in semantic_results:
+                pid = row["partner_id"]
+                grouped.setdefault(pid, []).append(row["content"])
+
+            formatted_answers = []
+
+            for partner_id, chunks in grouped.items():
+                try:
+                    partner = supabase_admin.table("partners") \
+                        .select("name") \
+                        .eq("id", partner_id) \
+                        .single() \
+                        .execute()
+
+                    partner_name = partner.data["name"] if partner.data else "Partner"
+                except Exception as e:
+                    print("PARTNER FETCH ERROR:", e)
+                    partner_name = "Partner"
+
+                cleaned = clean_chunks(chunks)
+                filtered = filter_chunks(cleaned, message)
+
+                answer = generate_contextual_answer(message, filtered, history)
+
+                formatted_answers.append({
+                    "partner_name": partner_name,
+                    "answer": answer
+                })
+
+            if formatted_answers:
+                return {
+                    "answers": formatted_answers,
+                    "source": "partner_docs_raw",
+                    "badge": "Partners",
+                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                    "requires_auth": False,
+                    "new_title": None
+                }
+
+    # =====================================================
+    # 5️⃣ YACHTING FALLBACK
+    # =====================================================
+    yachting_keywords = [
+        "yacht", "crew", "captain", "flag", "port state", "psc",
+        "manning", "inspection", "maritime", "ism", "isps",
+        "engine", "bridge", "deck", "charter", "mca", "class"
+    ]
+
+    if any(k in user_norm for k in yachting_keywords):
+        return {
+            "answer": NO_ANSWER_FALLBACK,
+            "source": "no_answer",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": user_role == "guest",
+            "new_title": None
+        }
+
+    # =====================================================
+    # 6️⃣ AI RESPONSE
     # =====================================================
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
@@ -558,13 +665,43 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
 
+    # =====================================================
+    # 7️⃣ AUTO TITLE
+    # =====================================================
+    new_title = None
+
+    if chat_id:
+        try:
+            existing_messages = get_chat_history(chat_id)
+
+            if len(existing_messages) <= 1:
+                title_resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Create a short 4-6 word title summarizing this topic."},
+                        {"role": "user", "content": message}
+                    ],
+                    temperature=0.3
+                )
+
+                new_title = title_resp.choices[0].message.content.strip()
+
+                supabase_admin.table("user_chats") \
+                    .update({"title": new_title}) \
+                    .eq("id", chat_id) \
+                    .execute()
+
+        except Exception as e:
+            print("TITLE ERROR:", e)
+
     return {
         "answer": answer,
         "source": "openai_general",
         "actions": [],
         "requires_auth": False,
-        "new_title": None
+        "new_title": new_title
     }
+
 
 def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
