@@ -497,14 +497,16 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
     if embedding:
         try:
-            qa_results = supabase_admin.rpc(
+            resp = supabase_admin.rpc(
                 "match_partner_qa",
                 {
                     "query_embedding": embedding,
                     "match_threshold": 0.75,
                     "match_count": 1
                 }
-            ).execute().data
+            ).execute()
+            print("PARTNER QA RAW:", resp)
+            qa_results = resp.data or []
         except Exception as e:
             print("PARTNER QA ERROR:", e)
             qa_results = []
