@@ -512,18 +512,20 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         if qa_results:
             row = qa_results[0]
 
+            partner_name = "Partner"
+
             try:
-                partner = supabase_admin.table("partners") \
+                partner_resp = supabase_admin.table("partners") \
                     .select("badge_label") \
                     .eq("id", row["partner_id"]) \
-                    .single() \
+                    .limit(1) \
                     .execute()
-
-                partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                
+                if partner_resp.data:
+                    partner_name = partner_resp.data[0].get("badge_label", "Partner")
 
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
-                partner_name = "Partner"
 
             answer = f"{row['answer']}\n\n({partner_name})"
 
