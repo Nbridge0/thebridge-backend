@@ -518,12 +518,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             # ✅ fetch partner name from partners table
             try:
                 partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
+                    .select("name") \
                     .eq("id", row["partner_id"]) \
                     .single() \
                     .execute()
 
-                partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                partner_name = partner.data["name"] if partner.data else "Partner"
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
                 partner_name = "Partner"
@@ -599,12 +599,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             for partner_id, chunks in grouped.items():
                 try:
                     partner = supabase_admin.table("partners") \
-                        .select("badge_label") \
+                        .select("name") \
                         .eq("id", partner_id) \
                         .single() \
                         .execute()
 
-                    partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                    partner_name = partner.data["name"] if partner.data else "Partner"
                 except Exception as e:
                     print("PARTNER FETCH ERROR:", e)
                     partner_name = "Partner"
