@@ -419,7 +419,6 @@ Context:
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
-```
 user_norm = normalize(message)
 
 # =====================================================
