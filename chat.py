@@ -419,187 +419,103 @@ Context:
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
-user_norm = normalize(message)
+    user_norm = normalize(message)
 
-# =====================================================
-# 1️⃣ HISTORY
-# =====================================================
-if not chat_id:
-    history = history or []
-else:
-    history = get_chat_history(chat_id)
+    # =====================================================
+    # 1️⃣ HISTORY
+    # =====================================================
+    if not chat_id:
+        history = history or []
+    else:
+        history = get_chat_history(chat_id)
 
-# =====================================================
-# 2️⃣ TROUBLESHOOTING
-# =====================================================
-user_id = str(chat_id) if chat_id else "guest_session"
+    # =====================================================
+    # 2️⃣ TROUBLESHOOTING
+    # =====================================================
+    user_id = str(chat_id) if chat_id else "guest_session"
 
-troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+    troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
 
-if troubleshoot:
-    return {
-        "answer": troubleshoot["answer"],
-        "source": troubleshoot["source"],
-        "badge": troubleshoot.get("badge"),
-        "actions": [],
-        "requires_auth": False,
-        "new_title": None
-    }
-
-# =====================================================
-# 3️⃣ EMBEDDING
-# =====================================================
-try:
-    embedding = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=message
-    ).data[0].embedding
-except Exception as e:
-    print("EMBEDDING ERROR:", e)
-    embedding = None
-
-# =====================================================
-# 4️⃣ THEBRIDGE QA
-# =====================================================
-if embedding:
-    try:
-        bridge_qa = supabase_admin.rpc(
-            "match_bridge_qa",
-            {
-                "query_embedding": embedding,
-                "match_threshold": 0.65,
-                "match_count": 5
-            }
-        ).execute().data
-    except Exception as e:
-        print("BRIDGE QA ERROR:", e)
-        bridge_qa = []
-
-    if bridge_qa:
-        chunks = [row["answer"] for row in bridge_qa]
-        cleaned = clean_chunks(chunks)
-        filtered = filter_chunks(cleaned, message)
-        filtered = [remove_redundant_prefixes(c) for c in filtered]
-
-        answer = generate_contextual_answer(message, filtered, history)
-
+    if troubleshoot:
         return {
-            "answer": answer,
-            "source": "bridge_semantic_raw",
-            "badge": "TheBridge",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "answer": troubleshoot["answer"],
+            "source": troubleshoot["source"],
+            "badge": troubleshoot.get("badge"),
+            "actions": [],
             "requires_auth": False,
             "new_title": None
         }
 
-# =====================================================
-# 5️⃣ PARTNER QA ✅ FIXED
-# =====================================================
-if embedding:
+    # =====================================================
+    # 3️⃣ EMBEDDING
+    # =====================================================
     try:
-        qa_results = supabase_admin.rpc(
-            "match_partner_qa",
-            {
-                "query_embedding": embedding,
-                "match_threshold": 0.75,
-                "match_count": 1
-            }
-        ).execute().data
+        embedding = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=message
+        ).data[0].embedding
     except Exception as e:
-        print("PARTNER QA ERROR:", e)
-        qa_results = []
+        print("EMBEDDING ERROR:", e)
+        embedding = None
 
-    if qa_results:
-        row = qa_results[0]
-
+    # =====================================================
+    # 4️⃣ THEBRIDGE QA
+    # =====================================================
+    if embedding:
         try:
-            partner = supabase_admin.table("partners") \
-                .select("badge_label") \
-                .eq("id", row["partner_id"]) \
-                .single() \
-                .execute()
-
-            partner_name = partner.data["badge_label"] if partner.data else "Partner"
-
+            bridge_qa = supabase_admin.rpc(
+                "match_bridge_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.65,
+                    "match_count": 5
+                }
+            ).execute().data
         except Exception as e:
-            print("PARTNER FETCH ERROR:", e)
-            partner_name = "Partner"
+            print("BRIDGE QA ERROR:", e)
+            bridge_qa = []
 
-        answer = f"{row['answer']}\n\n({partner_name})"
+        if bridge_qa:
+            chunks = [row["answer"] for row in bridge_qa]
+            cleaned = clean_chunks(chunks)
+            filtered = filter_chunks(cleaned, message)
+            filtered = [remove_redundant_prefixes(c) for c in filtered]
 
-        return {
-            "answer": answer,
-            "source": "partner_qa",
-            "badge": partner_name,
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-            "new_title": None
-        }
+            answer = generate_contextual_answer(message, filtered, history)
 
-# =====================================================
-# 6️⃣ THEBRIDGE DOCS
-# =====================================================
-if embedding:
-    try:
-        bridge_results = supabase_admin.rpc(
-            "match_bridge_chunks",
-            {
-                "query_embedding": embedding,
-                "match_threshold": 0.65,
-                "match_count": 8
+            return {
+                "answer": answer,
+                "source": "bridge_semantic_raw",
+                "badge": "TheBridge",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
             }
-        ).execute().data
-    except Exception as e:
-        print("BRIDGE DOC ERROR:", e)
-        bridge_results = []
 
-    if bridge_results:
-        chunks = [row["content"] for row in bridge_results]
-        cleaned = clean_chunks(chunks)
-        filtered = filter_chunks(cleaned, message)
+    # =====================================================
+    # 5️⃣ PARTNER QA
+    # =====================================================
+    if embedding:
+        try:
+            qa_results = supabase_admin.rpc(
+                "match_partner_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.75,
+                    "match_count": 1
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER QA ERROR:", e)
+            qa_results = []
 
-        answer = generate_contextual_answer(message, filtered, history)
+        if qa_results:
+            row = qa_results[0]
 
-        return {
-            "answer": answer,
-            "source": "bridge_docs_raw",
-            "badge": "TheBridge",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-            "new_title": None
-        }
-
-# =====================================================
-# 7️⃣ PARTNER DOCS ✅ FIXED
-# =====================================================
-if embedding:
-    try:
-        semantic_results = supabase_admin.rpc(
-            "match_partner_chunks",
-            {
-                "query_embedding": embedding,
-                "match_threshold": 0.72,
-                "match_count": 8
-            }
-        ).execute().data
-    except Exception as e:
-        print("PARTNER DOC ERROR:", e)
-        semantic_results = []
-
-    if semantic_results:
-
-        grouped = {}
-        for row in semantic_results:
-            pid = row["partner_id"]
-            grouped.setdefault(pid, []).append(row["content"])
-
-        formatted_answers = []
-
-        for partner_id, chunks in grouped.items():
             try:
                 partner = supabase_admin.table("partners") \
                     .select("badge_label") \
-                    .eq("id", partner_id) \
+                    .eq("id", row["partner_id"]) \
                     .single() \
                     .execute()
 
@@ -609,55 +525,42 @@ if embedding:
                 print("PARTNER FETCH ERROR:", e)
                 partner_name = "Partner"
 
-            cleaned = clean_chunks(chunks)
-            filtered = filter_chunks(cleaned, message)
-
-            answer = generate_contextual_answer(message, filtered, history)
-
-            formatted_answers.append({
-                "partner_name": partner_name,
-                "answer": f"{answer}\n\n({partner_name})",
-            })
-
-        if formatted_answers:
-            best = formatted_answers[0]
+            answer = f"{row['answer']}\n\n({partner_name})"
 
             return {
-                "answer": best["answer"],
-                "source": "partner_docs_raw",
-                "badge": best["partner_name"],
+                "answer": answer,
+                "source": "partner_qa",
+                "badge": partner_name,
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
                 "requires_auth": False,
                 "new_title": None
             }
 
-# =====================================================
-# 8️⃣ FALLBACK + AI
-# =====================================================
-messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
-messages.extend(history)
-messages.append({"role": "user", "content": message})
+    # =====================================================
+    # 6️⃣ FALLBACK AI
+    # =====================================================
+    messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
 
-try:
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.7
-    )
-    answer = response.choices[0].message.content.strip()
-except Exception as e:
-    print("OPENAI ERROR:", e)
-    answer = "⚠️ AI temporary error. Please try again."
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7
+        )
+        answer = response.choices[0].message.content.strip()
+    except Exception as e:
+        print("OPENAI ERROR:", e)
+        answer = "⚠️ AI temporary error. Please try again."
 
-return {
-    "answer": answer,
-    "source": "openai_general",
-    "actions": [],
-    "requires_auth": False,
-    "new_title": None
-}
-```
-
+    return {
+        "answer": answer,
+        "source": "openai_general",
+        "actions": [],
+        "requires_auth": False,
+        "new_title": None
+    }
 
 def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
