@@ -1,4 +1,5 @@
 # troubleshooting.py
+
 TROUBLESHOOTING_SESSIONS = {}
 
 
@@ -11,8 +12,7 @@ def run_troubleshooting(user_id, message, supabase):
     # ---------------------------------------
     if not session:
 
-        from chat import detect_system
-        system = detect_system(msg)
+        system = detect_system_from_message(msg)
 
         # If we can't detect system → don't start
         if not system:

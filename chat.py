@@ -9,7 +9,6 @@ from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from typing import Optional
 from troubleshooting import run_troubleshooting, TROUBLESHOOTING_SESSIONS
-from utils import detect_system
 
 # -------------------------------
 # ENV
@@ -427,23 +426,20 @@ def is_troubleshooting_candidate(message: str) -> bool:
         "no power",
         "no signal",
         "cannot connect",
-        "can't connect",
         "failed",
-        "failure",
         "error",
-        "issue",
-        "problem",
-        "fault"
+        "issue"
     ]
 
     return any(p in msg for p in problem_signals)
+
 
 def detect_system(message: str):
     msg = message.lower()
 
     systems = {
         "power_module": ["power module", "power", "led", "fuse"],
-        "transducer": ["transducer", "sonar"],
+        "transducer": ["transducer", "sonar", "capacitance"],
         "network": ["network", "ip", "ping", "ethernet"],
         "computer": ["computer", "software", "sonasoft"]
     }
@@ -467,55 +463,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         history = get_chat_history(chat_id)
 
     print("HISTORY DEBUG:", history)
-   
-# =====================================================
-# SESSION + TROUBLESHOOTING (FINAL CLEAN VERSION)
-# =====================================================
-
-    user_id = str(chat_id) if chat_id else "guest_session"
     answer_found = False
+   
 
-# -----------------------------------------------------
-# 1️⃣ CONTINUE EXISTING TROUBLESHOOTING (HIGHEST PRIORITY)
-# -----------------------------------------------------
-    if user_id in TROUBLESHOOTING_SESSIONS:
-
-        if not is_troubleshooting_candidate(message) and message.lower() not in ["yes", "no", "y", "n", "exit"]:
-            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-        else:
-            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
-            if troubleshoot:
-                return {
-                    "answer": troubleshoot["answer"],
-                    "source": troubleshoot["source"],
-                    "badge": troubleshoot.get("badge"),
-                    "actions": [],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-
-# -----------------------------------------------------
-# 2️⃣ START NEW TROUBLESHOOTING (BEFORE ANYTHING ELSE)
-# -----------------------------------------------------
-    system = detect_system(message)
-
-    if system and is_troubleshooting_candidate(message):
-        troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
-        if troubleshoot:
-            return {
-                "answer": troubleshoot["answer"],
-                "source": troubleshoot["source"],
-                "badge": troubleshoot.get("badge"),
-                "actions": [],
-                "requires_auth": False,
-                "new_title": None
-            }
-
-# -----------------------------------------------------
-# 3️⃣ EMBEDDING (ONLY AFTER TROUBLESHOOTING CHECK)
-# -----------------------------------------------------
+    # =====================================================
+    # EMBEDDING
+    # =====================================================
     try:
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
@@ -525,9 +478,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("EMBEDDING ERROR:", e)
         embedding = None
 
-# -----------------------------------------------------
-# 4️⃣ THEBRIDGE QA
-# -----------------------------------------------------
+    # =====================================================
+    # 1️⃣ THEBRIDGE QA
+    # =====================================================
     if embedding:
         try:
             bridge_qa = supabase_admin.rpc(
@@ -542,7 +495,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             print("BRIDGE QA ERROR:", e)
             bridge_qa = []
 
-        if bridge_qa:    
+        if bridge_qa:
             chunks = [row["answer"] for row in bridge_qa]
             cleaned = clean_chunks(chunks)
             filtered = filter_chunks(cleaned, message)
@@ -551,7 +504,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             answer = generate_contextual_answer(message, filtered, history)
             answer = adjust_plurality(answer, message)
             answer_found = True
-
             return {
                 "answer": answer,
                 "source": "bridge_semantic_raw",
@@ -698,8 +650,51 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
+ # =====================================================
+# 🛠 TROUBLESHOOTING (FINAL)
+# =====================================================
 
+    user_id = str(chat_id) if chat_id else "guest_session"
 
+# ---------------------------------------
+# 1️⃣ CONTINUE EXISTING SESSION
+# ---------------------------------------
+    if user_id in TROUBLESHOOTING_SESSIONS:
+
+        # allow user to exit naturally if they change topic
+        if not is_troubleshooting_candidate(message) and message.lower() not in ["yes", "no", "y", "n", "exit"]:
+            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+        else:
+            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+            if troubleshoot:
+                return {
+                    "answer": troubleshoot["answer"],
+                    "source": troubleshoot["source"],
+                    "badge": troubleshoot.get("badge"),
+                    "actions": [],
+                    "requires_auth": False,
+                    "new_title": None
+                }
+
+# ---------------------------------------
+# 2️⃣ START NEW SESSION (ONLY IF NO ANSWER FOUND)
+# ---------------------------------------
+    if not answer_found:
+        system = detect_system(message)
+
+        if system and (is_troubleshooting_candidate(message) or not answer_found):
+            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+            if troubleshoot:
+                return {
+                    "answer": troubleshoot["answer"],
+                    "source": troubleshoot["source"],
+                    "badge": troubleshoot.get("badge"),
+                    "actions": [],
+                    "requires_auth": False,
+                    "new_title": None
+                }
     # =====================================================
     # 5️⃣ YACHTING FALLBACK
     # =====================================================
