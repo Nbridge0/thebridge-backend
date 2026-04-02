@@ -161,97 +161,76 @@ def run_troubleshooting(user_id, message, supabase):
 # ---------------------------------------
 def detect_system_from_message(msg: str):
 
-    systems = {
-        "power_module": [
-            "power module",
-            "no power",
-            "power issue",
-            "power not working",
-            "led",
-            "fuse"
-        ],
-        "transducer": [
-            "transducer",
-            "sonar",
-            "no signal",
-            "not detecting"
-        ],
-        "network": [
-            "network",
-            "ip",
-            "ping",
-            "ethernet",
-            "cannot connect",
-            "network issue"
-        ],
-        "computer": [
-            "computer",
-            "software",
-            "sonasoft",
-            "crash",
-            "not responding",
-            "app not working"
-        ]
-    }
+    msg = msg.lower()
 
-    for system, keywords in systems.items():
-        if any(all(word in msg for word in k.split()) for k in keywords):
-            return system
+    # 🔥 HARD OVERRIDES (CRITICAL)
+    if "transducer" in msg:
+        return "transducer"
+
+    if "power" in msg:
+        return "power_module"
+
+    if "network" in msg or "ip" in msg:
+        return "network"
+
+    if "computer" in msg or "software" in msg:
+        return "computer"
 
     return None
-
 
 # ---------------------------------------
 # FAILURE DETECTION (FIXED)
 # ---------------------------------------
 def detect_failure_from_message(msg: str):
 
+    msg = msg.lower()
+
+    # 🔥 HARD OVERRIDES (CRITICAL FIX)
+    if "transducer" in msg and "not working" in msg:
+        return "transducer_not_detected"
+
+    if "power" in msg and "not working" in msg:
+        return "power_led_not_lit"
+
+    if "network" in msg and ("not working" in msg or "cannot connect" in msg):
+        return "ip_not_reachable"
+
+    if "computer" in msg and "not working" in msg:
+        return "software_not_responding"
+
+    # ---------------------------------------
+    # FALLBACK KEYWORD MATCHING
+    # ---------------------------------------
     mapping = {
 
-        # 🔌 POWER
         "power_led_not_lit": [
             "no power",
             "power not working",
-            "led off",
-            "power module dead",
-            "power stopped working"
+            "led off"
         ],
 
-        # 🌊 TRANSDUCER
         "transducer_not_detected": [
             "no signal",
-            "transducer not working",
-            "transducer not detecting",
-            "transducer issue",
-            "transducer failure",
-            "not detecting bottom",
+            "not detecting",
             "no seabed"
         ],
 
-        # 🌐 NETWORK
         "ip_not_reachable": [
             "cannot connect",
             "network issue",
-            "ping failed",
-            "ip not reachable",
-            "ethernet not working",
-            "network failure"
+            "ping failed"
         ],
 
-        # 💻 COMPUTER
         "software_not_responding": [
             "software issue",
-            "sonasoft not working",
-            "computer not responding",
             "app crash",
-            "program not opening",
-            "app not working"
+            "not responding"
         ],
     }
 
     for key, keywords in mapping.items():
         for k in keywords:
-            if all(word in msg for word in k.split()):
+            if k in msg:
                 return key
 
     return None
