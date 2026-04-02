@@ -464,6 +464,42 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
     answer_found = False
+
+    # =====================================================
+# 🛠 TROUBLESHOOTING (PRIORITY FIX)
+# =====================================================
+
+    user_id = str(chat_id) if chat_id else "guest_session"
+
+    # CONTINUE SESSION
+    if user_id in TROUBLESHOOTING_SESSIONS:
+        troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+        if troubleshoot:
+            return {
+                "answer": troubleshoot["answer"],
+                "source": troubleshoot["source"],
+                "badge": troubleshoot.get("badge"),
+                "actions": [],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # START SESSION (BEFORE DOC SEARCH)
+    system = detect_system(message)
+
+    if system:
+        troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+        if troubleshoot:
+            return {
+                "answer": troubleshoot["answer"],
+                "source": troubleshoot["source"],
+                "badge": troubleshoot.get("badge"),
+                "actions": [],
+                "requires_auth": False,
+                "new_title": None
+            }
    
 
     # =====================================================
@@ -650,52 +686,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
- # =====================================================
-# 🛠 TROUBLESHOOTING (FINAL)
-# =====================================================
 
-    user_id = str(chat_id) if chat_id else "guest_session"
-
-# ---------------------------------------
-# 1️⃣ CONTINUE EXISTING SESSION
-# ---------------------------------------
-    if user_id in TROUBLESHOOTING_SESSIONS:
-
-        # allow user to exit naturally if they change topic
-        if not is_troubleshooting_candidate(message) and message.lower() not in ["yes", "no", "y", "n", "exit"]:
-            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-        else:
-            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
-            if troubleshoot:
-                return {
-                    "answer": troubleshoot["answer"],
-                    "source": troubleshoot["source"],
-                    "badge": troubleshoot.get("badge"),
-                    "actions": [],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-
- # ---------------------------------------
-# 2️⃣ START NEW SESSION
-# ---------------------------------------
-    if not answer_found:
-
-        system = detect_system(message)
-
-        if system:
-            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
-            if troubleshoot:
-                return {
-                    "answer": troubleshoot["answer"],
-                    "source": troubleshoot["source"],
-                    "badge": troubleshoot.get("badge"),
-                    "actions": [],
-                    "requires_auth": False,
-                    "new_title": None
-                }
     # =====================================================
     # 5️⃣ YACHTING FALLBACK
     # =====================================================
