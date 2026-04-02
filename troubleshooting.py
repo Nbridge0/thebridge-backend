@@ -14,14 +14,29 @@ def run_troubleshooting(user_id, message, supabase):
 
         system = detect_system_from_message(msg)
 
-        # If we can't detect system → don't start
         if not system:
             return None
 
-        # Fetch steps from DB
+        # 🔥 Detect failure type
+        failure_key = detect_failure_from_message(msg)
+
+        if not failure_key:
+            return {
+                "answer": (
+                    "Which issue are you experiencing?\n\n"
+                    "- No power\n"
+                    "- No signal\n"
+                    "- Network issue\n\n"
+                    "Please specify."
+                ),
+                "source": "troubleshooting"
+            }
+
+        # 🔥 Fetch ONLY correct failure path
         resp = supabase.table("partner_troubleshooting") \
             .select("*") \
             .eq("system", system) \
+            .eq("failure_key", failure_key) \
             .order("step_order") \
             .execute()
 
@@ -32,7 +47,6 @@ def run_troubleshooting(user_id, message, supabase):
 
         partner_name = steps[0].get("partner_name", "Partner")
 
-        # Create session
         TROUBLESHOOTING_SESSIONS[user_id] = {
             "step_index": 0,
             "steps": steps,
@@ -59,19 +73,22 @@ def run_troubleshooting(user_id, message, supabase):
     steps = session["steps"]
     partner_name = session.get("partner_name", "Partner")
 
-    # If session finished
     if step_index >= len(steps):
         TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         return {
-            "answer": "✅ Troubleshooting complete.",
+            "answer": (
+                "✅ Troubleshooting step completed.\n\n"
+                "If the issue persists, further investigation may be required."
+            ),
             "source": "troubleshooting",
             "badge": partner_name
         }
 
     step = steps[step_index]
 
-    # Normalize answer
     answer = msg.strip()
+
+    # EXIT
     if answer == "exit":
         TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         return {
@@ -86,11 +103,13 @@ def run_troubleshooting(user_id, message, supabase):
 
         session["step_index"] += 1
 
-        # If finished after increment
         if session["step_index"] >= len(steps):
             TROUBLESHOOTING_SESSIONS.pop(user_id, None)
             return {
-                "answer": "✅ System check complete. Everything looks good.",
+                "answer": (
+                    "✅ Troubleshooting step completed.\n\n"
+                    "If the issue persists, further investigation may be required."
+                ),
                 "source": "troubleshooting",
                 "badge": partner_name
             }
@@ -99,7 +118,7 @@ def run_troubleshooting(user_id, message, supabase):
 
         return {
             "answer": (
-                f"{step.get('yes', 'Great.')}\n\n"
+                f"{step.get('yes', 'Proceed.')}\n\n"
                 f"➡️ {next_step['question']}\n\n"
                 "Please answer: yes / no"
             ),
@@ -136,7 +155,7 @@ def run_troubleshooting(user_id, message, supabase):
 
 
 # ---------------------------------------
-# SYSTEM DETECTION (USED INTERNALLY)
+# SYSTEM DETECTION
 # ---------------------------------------
 def detect_system_from_message(msg: str):
 
@@ -150,5 +169,23 @@ def detect_system_from_message(msg: str):
     for system, keywords in systems.items():
         if any(k in msg for k in keywords):
             return system
+
+    return None
+
+
+# ---------------------------------------
+# FAILURE DETECTION (CRITICAL)
+# ---------------------------------------
+def detect_failure_from_message(msg: str):
+
+    mapping = {
+        "power_led_not_lit": ["no power", "power not working", "led off"],
+        "transducer_not_detected": ["no signal", "transducer not working"],
+        "ip_not_reachable": ["cannot connect", "network", "ping", "ip"],
+    }
+
+    for key, keywords in mapping.items():
+        if any(k in msg for k in keywords):
+            return key
 
     return None
