@@ -161,6 +161,9 @@ def detect_system_from_message(msg: str):
         "power_module": [
             "power module",
             "no power",
+            "my power is not working",
+            "my power's not working",
+            "my power is not working what should I do?",
             "power issue",
             "led",
             "fuse",
@@ -169,6 +172,9 @@ def detect_system_from_message(msg: str):
         "transducer": [
             "transducer",
             "sonar",
+            "my transducer is not working",
+            "transducer's not working",
+            "my transducer is not working what should I do?",
             "no signal",
             "not detecting",
             "not working"
@@ -177,6 +183,9 @@ def detect_system_from_message(msg: str):
             "network",
             "ip",
             "ping",
+            "my network is not working",
+            "network's not working",
+            "my network is not working what should I do?",
             "ethernet",
             "cannot connect",
             "network issue"
@@ -185,6 +194,9 @@ def detect_system_from_message(msg: str):
             "computer",
             "software",
             "sonasoft",
+            "my computer is not working",
+            "computer's not working",
+            "my computer is not working what should I do?",
             "crash",
             "not responding",
             "app not working"
