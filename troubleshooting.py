@@ -8,37 +8,20 @@ def run_troubleshooting(user_id, message, supabase):
     session = TROUBLESHOOTING_SESSIONS.get(user_id)
 
     # ---------------------------------------
-    # STEP 1: START SESSION
+    # STEP 1: START SESSION (ONLY IF NONE EXISTS)
     # ---------------------------------------
     if not session:
 
         system = detect_system_from_message(msg)
 
+        # If we can't detect system → don't start
         if not system:
             return None
 
-        failure_key = detect_failure_from_message(msg)
-
-        # DEBUG (optional - remove later)
-        print("DEBUG SYSTEM:", system)
-        print("DEBUG FAILURE:", failure_key)
-
-        if not failure_key:
-            return {
-                "answer": (
-                    "Please specify the issue more clearly:\n\n"
-                    "- No power\n"
-                    "- No signal\n"
-                    "- Network issue\n"
-                    "- Software issue"
-                ),
-                "source": "troubleshooting"
-            }
-
+        # Fetch steps from DB
         resp = supabase.table("partner_troubleshooting") \
             .select("*") \
             .eq("system", system) \
-            .eq("failure_key", failure_key) \
             .order("step_order") \
             .execute()
 
@@ -49,11 +32,11 @@ def run_troubleshooting(user_id, message, supabase):
 
         partner_name = steps[0].get("partner_name", "Partner")
 
+        # Create session
         TROUBLESHOOTING_SESSIONS[user_id] = {
             "step_index": 0,
             "steps": steps,
             "system": system,
-            "failure_key": failure_key,
             "partner_name": partner_name
         }
 
@@ -76,21 +59,19 @@ def run_troubleshooting(user_id, message, supabase):
     steps = session["steps"]
     partner_name = session.get("partner_name", "Partner")
 
+    # If session finished
     if step_index >= len(steps):
         TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         return {
-            "answer": (
-                "✅ Troubleshooting complete.\n\n"
-                "If the issue persists, further investigation is required."
-            ),
+            "answer": "✅ Troubleshooting complete.",
             "source": "troubleshooting",
             "badge": partner_name
         }
 
     step = steps[step_index]
-    answer = msg.strip()
 
-    # EXIT
+    # Normalize answer
+    answer = msg.strip()
     if answer == "exit":
         TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         return {
@@ -99,19 +80,17 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # YES
+    # HANDLE YES
     # ---------------------------------------
     if answer in ["yes", "y"]:
 
         session["step_index"] += 1
 
+        # If finished after increment
         if session["step_index"] >= len(steps):
             TROUBLESHOOTING_SESSIONS.pop(user_id, None)
             return {
-                "answer": (
-                    "✅ Troubleshooting complete.\n\n"
-                    "System checks passed."
-                ),
+                "answer": "✅ System check complete. Everything looks good.",
                 "source": "troubleshooting",
                 "badge": partner_name
             }
@@ -120,7 +99,7 @@ def run_troubleshooting(user_id, message, supabase):
 
         return {
             "answer": (
-                f"{step.get('yes', 'Proceed.')}\n\n"
+                f"{step.get('yes', 'Great.')}\n\n"
                 f"➡️ {next_step['question']}\n\n"
                 "Please answer: yes / no"
             ),
@@ -129,7 +108,7 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # NO
+    # HANDLE NO
     # ---------------------------------------
     elif answer in ["no", "n"]:
 
@@ -143,7 +122,7 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # INVALID
+    # INVALID INPUT
     # ---------------------------------------
     else:
         return {
@@ -157,80 +136,19 @@ def run_troubleshooting(user_id, message, supabase):
 
 
 # ---------------------------------------
-# SYSTEM DETECTION (FIXED)
+# SYSTEM DETECTION (USED INTERNALLY)
 # ---------------------------------------
 def detect_system_from_message(msg: str):
 
-    msg = msg.lower()
-
-    # 🔥 HARD OVERRIDES (CRITICAL)
-    if "transducer" in msg:
-        return "transducer"
-
-    if "power" in msg:
-        return "power_module"
-
-    if "network" in msg or "ip" in msg:
-        return "network"
-
-    if "computer" in msg or "software" in msg:
-        return "computer"
-
-    return None
-
-# ---------------------------------------
-# FAILURE DETECTION (FIXED)
-# ---------------------------------------
-def detect_failure_from_message(msg: str):
-
-    msg = msg.lower()
-
-    # 🔥 HARD OVERRIDES (CRITICAL FIX)
-    if "transducer" in msg and "not working" in msg:
-        return "transducer_not_detected"
-
-    if "power" in msg and "not working" in msg:
-        return "power_led_not_lit"
-
-    if "network" in msg and ("not working" in msg or "cannot connect" in msg):
-        return "ip_not_reachable"
-
-    if "computer" in msg and "not working" in msg:
-        return "software_not_responding"
-
-    # ---------------------------------------
-    # FALLBACK KEYWORD MATCHING
-    # ---------------------------------------
-    mapping = {
-
-        "power_led_not_lit": [
-            "no power",
-            "power not working",
-            "led off"
-        ],
-
-        "transducer_not_detected": [
-            "no signal",
-            "not detecting",
-            "no seabed"
-        ],
-
-        "ip_not_reachable": [
-            "cannot connect",
-            "network issue",
-            "ping failed"
-        ],
-
-        "software_not_responding": [
-            "software issue",
-            "app crash",
-            "not responding"
-        ],
+    systems = {
+        "power_module": ["power module", "no power", "led", "fuse"],
+        "transducer": ["transducer", "sonar", "capacitance"],
+        "network": ["network", "ip", "ping", "ethernet"],
+        "computer": ["computer", "software", "sonasoft"]
     }
 
-    for key, keywords in mapping.items():
-        for k in keywords:
-            if k in msg:
-                return key
+    for system, keywords in systems.items():
+        if any(k in msg for k in keywords):
+            return system
 
     return None
