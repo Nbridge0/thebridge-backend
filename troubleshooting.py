@@ -1,5 +1,4 @@
 # troubleshooting.py
-from utils import detect_system
 TROUBLESHOOTING_SESSIONS = {}
 
 
