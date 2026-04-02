@@ -677,13 +677,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
-# ---------------------------------------
-# 2️⃣ START NEW SESSION (ONLY IF NO ANSWER FOUND)
+ # ---------------------------------------
+# 2️⃣ START NEW SESSION
 # ---------------------------------------
     if not answer_found:
+
         system = detect_system(message)
 
-        if system and (is_troubleshooting_candidate(message) or not answer_found):
+        if system:
             troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
 
             if troubleshoot:

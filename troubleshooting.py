@@ -76,8 +76,8 @@ def run_troubleshooting(user_id, message, supabase):
         TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         return {
             "answer": (
-                "✅ Troubleshooting step completed.\n\n"
-                "If the issue persists, further investigation may be required."
+                "✅ Troubleshooting complete.\n\n"
+                "If the issue persists, further investigation is required."
             ),
             "source": "troubleshooting",
             "badge": partner_name
@@ -105,8 +105,8 @@ def run_troubleshooting(user_id, message, supabase):
             TROUBLESHOOTING_SESSIONS.pop(user_id, None)
             return {
                 "answer": (
-                    "✅ Troubleshooting step completed.\n\n"
-                    "If the issue persists, further investigation may be required."
+                    "✅ Troubleshooting complete.\n\n"
+                    "System checks passed."
                 ),
                 "source": "troubleshooting",
                 "badge": partner_name
@@ -153,7 +153,7 @@ def run_troubleshooting(user_id, message, supabase):
 
 
 # ---------------------------------------
-# SYSTEM DETECTION
+# SYSTEM DETECTION (FIXED)
 # ---------------------------------------
 def detect_system_from_message(msg: str):
 
@@ -163,27 +163,31 @@ def detect_system_from_message(msg: str):
             "no power",
             "power issue",
             "led",
-            "fuse"
+            "fuse",
+            "power not working"
         ],
         "transducer": [
             "transducer",
             "sonar",
             "no signal",
-            "not detecting"
+            "not detecting",
+            "not working"
         ],
         "network": [
             "network",
             "ip",
             "ping",
             "ethernet",
-            "cannot connect"
+            "cannot connect",
+            "network issue"
         ],
         "computer": [
             "computer",
             "software",
             "sonasoft",
             "crash",
-            "not responding"
+            "not responding",
+            "app not working"
         ]
     }
 
@@ -195,7 +199,7 @@ def detect_system_from_message(msg: str):
 
 
 # ---------------------------------------
-# FAILURE DETECTION
+# FAILURE DETECTION (FIXED)
 # ---------------------------------------
 def detect_failure_from_message(msg: str):
 
@@ -206,7 +210,7 @@ def detect_failure_from_message(msg: str):
             "no power",
             "power not working",
             "led off",
-            "power module dead"
+            "power module dead",
             "my power's not working",
             "my power is not working",
             "my power stopped working"
@@ -218,7 +222,10 @@ def detect_failure_from_message(msg: str):
             "transducer not working",
             "transducer not detecting",
             "transducer issue",
-            "my transducer is not working"
+            "my transducer is not working",
+            "transducer failure",
+            "not detecting bottom",
+            "no seabed"
         ],
 
         # 🌐 NETWORK
@@ -227,9 +234,8 @@ def detect_failure_from_message(msg: str):
             "network issue",
             "ping failed",
             "ip not reachable",
-            "I have network failure",
-            "network failed issue",
-            "ethernet not working"
+            "ethernet not working",
+            "network failure"
         ],
 
         # 💻 COMPUTER
@@ -238,10 +244,8 @@ def detect_failure_from_message(msg: str):
             "sonasoft not working",
             "computer not responding",
             "app crash",
-            "my computer's not working",
-            "my computer is not working",
-            "my computer stopped working",
-            "program not opening"
+            "program not opening",
+            "app not working"
         ],
     }
 
