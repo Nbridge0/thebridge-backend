@@ -8,7 +8,7 @@ def run_troubleshooting(user_id, message, supabase):
     session = TROUBLESHOOTING_SESSIONS.get(user_id)
 
     # ---------------------------------------
-    # STEP 1: START SESSION (ONLY IF NONE EXISTS)
+    # STEP 1: START SESSION
     # ---------------------------------------
     if not session:
 
@@ -17,22 +17,20 @@ def run_troubleshooting(user_id, message, supabase):
         if not system:
             return None
 
-        # 🔥 Detect failure type
         failure_key = detect_failure_from_message(msg)
 
         if not failure_key:
             return {
                 "answer": (
-                    "Which issue are you experiencing?\n\n"
+                    "Please specify the issue more clearly:\n\n"
                     "- No power\n"
                     "- No signal\n"
-                    "- Network issue\n\n"
-                    "Please specify."
+                    "- Network issue\n"
+                    "- Software issue"
                 ),
                 "source": "troubleshooting"
             }
 
-        # 🔥 Fetch ONLY correct failure path
         resp = supabase.table("partner_troubleshooting") \
             .select("*") \
             .eq("system", system) \
@@ -51,6 +49,7 @@ def run_troubleshooting(user_id, message, supabase):
             "step_index": 0,
             "steps": steps,
             "system": system,
+            "failure_key": failure_key,
             "partner_name": partner_name
         }
 
@@ -85,7 +84,6 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     step = steps[step_index]
-
     answer = msg.strip()
 
     # EXIT
@@ -97,7 +95,7 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # HANDLE YES
+    # YES
     # ---------------------------------------
     if answer in ["yes", "y"]:
 
@@ -127,7 +125,7 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # HANDLE NO
+    # NO
     # ---------------------------------------
     elif answer in ["no", "n"]:
 
@@ -141,7 +139,7 @@ def run_troubleshooting(user_id, message, supabase):
         }
 
     # ---------------------------------------
-    # INVALID INPUT
+    # INVALID
     # ---------------------------------------
     else:
         return {
@@ -160,10 +158,33 @@ def run_troubleshooting(user_id, message, supabase):
 def detect_system_from_message(msg: str):
 
     systems = {
-        "power_module": ["power module", "no power", "led", "fuse"],
-        "transducer": ["transducer", "sonar", "capacitance"],
-        "network": ["network", "ip", "ping", "ethernet"],
-        "computer": ["computer", "software", "sonasoft"]
+        "power_module": [
+            "power module",
+            "no power",
+            "power issue",
+            "led",
+            "fuse"
+        ],
+        "transducer": [
+            "transducer",
+            "sonar",
+            "no signal",
+            "not detecting"
+        ],
+        "network": [
+            "network",
+            "ip",
+            "ping",
+            "ethernet",
+            "cannot connect"
+        ],
+        "computer": [
+            "computer",
+            "software",
+            "sonasoft",
+            "crash",
+            "not responding"
+        ]
     }
 
     for system, keywords in systems.items():
@@ -174,14 +195,54 @@ def detect_system_from_message(msg: str):
 
 
 # ---------------------------------------
-# FAILURE DETECTION (CRITICAL)
+# FAILURE DETECTION
 # ---------------------------------------
 def detect_failure_from_message(msg: str):
 
     mapping = {
-        "power_led_not_lit": ["no power", "power not working", "led off"],
-        "transducer_not_detected": ["no signal", "transducer not working"],
-        "ip_not_reachable": ["cannot connect", "network", "ping", "ip"],
+
+        # 🔌 POWER
+        "power_led_not_lit": [
+            "no power",
+            "power not working",
+            "led off",
+            "power module dead"
+            "my power's not working",
+            "my power is not working",
+            "my power stopped working"
+        ],
+
+        # 🌊 TRANSDUCER
+        "transducer_not_detected": [
+            "no signal",
+            "transducer not working",
+            "transducer not detecting",
+            "transducer issue",
+            "my transducer is not working"
+        ],
+
+        # 🌐 NETWORK
+        "ip_not_reachable": [
+            "cannot connect",
+            "network issue",
+            "ping failed",
+            "ip not reachable",
+            "I have network failure",
+            "network failed issue",
+            "ethernet not working"
+        ],
+
+        # 💻 COMPUTER
+        "software_not_responding": [
+            "software issue",
+            "sonasoft not working",
+            "computer not responding",
+            "app crash",
+            "my computer's not working",
+            "my computer is not working",
+            "my computer stopped working",
+            "program not opening"
+        ],
     }
 
     for key, keywords in mapping.items():
