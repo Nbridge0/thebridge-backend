@@ -428,11 +428,13 @@ def is_troubleshooting_candidate(message: str) -> bool:
         "cannot connect",
         "failed",
         "error",
-        "issue"
+        "issue",
+        "problem",
+        "not detecting",
+        "not responding"
     ]
 
     return any(p in msg for p in problem_signals)
-
 
 def detect_system(message: str):
     msg = message.lower()
@@ -485,10 +487,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "new_title": None
             }
 
-    # START SESSION (BEFORE DOC SEARCH)
-    system = detect_system(message)
-
-    if system:
+    # START SESSION (SMART TRIGGER)
+    if is_troubleshooting_candidate(message):
         troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
 
         if troubleshoot:

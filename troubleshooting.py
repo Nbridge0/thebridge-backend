@@ -19,6 +19,10 @@ def run_troubleshooting(user_id, message, supabase):
 
         failure_key = detect_failure_from_message(msg)
 
+        # DEBUG (optional - remove later)
+        print("DEBUG SYSTEM:", system)
+        print("DEBUG FAILURE:", failure_key)
+
         if not failure_key:
             return {
                 "answer": (
@@ -161,31 +165,21 @@ def detect_system_from_message(msg: str):
         "power_module": [
             "power module",
             "no power",
-            "my power is not working",
-            "my power's not working",
-            "my power is not working what should I do?",
             "power issue",
+            "power not working",
             "led",
-            "fuse",
-            "power not working"
+            "fuse"
         ],
         "transducer": [
             "transducer",
             "sonar",
-            "my transducer is not working",
-            "transducer's not working",
-            "my transducer is not working what should I do?",
             "no signal",
-            "not detecting",
-            "not working"
+            "not detecting"
         ],
         "network": [
             "network",
             "ip",
             "ping",
-            "my network is not working",
-            "network's not working",
-            "my network is not working what should I do?",
             "ethernet",
             "cannot connect",
             "network issue"
@@ -194,9 +188,6 @@ def detect_system_from_message(msg: str):
             "computer",
             "software",
             "sonasoft",
-            "my computer is not working",
-            "computer's not working",
-            "my computer is not working what should I do?",
             "crash",
             "not responding",
             "app not working"
@@ -204,7 +195,7 @@ def detect_system_from_message(msg: str):
     }
 
     for system, keywords in systems.items():
-        if any(k in msg for k in keywords):
+        if any(all(word in msg for word in k.split()) for k in keywords):
             return system
 
     return None
@@ -223,9 +214,7 @@ def detect_failure_from_message(msg: str):
             "power not working",
             "led off",
             "power module dead",
-            "my power's not working",
-            "my power is not working",
-            "my power stopped working"
+            "power stopped working"
         ],
 
         # 🌊 TRANSDUCER
@@ -234,7 +223,6 @@ def detect_failure_from_message(msg: str):
             "transducer not working",
             "transducer not detecting",
             "transducer issue",
-            "my transducer is not working",
             "transducer failure",
             "not detecting bottom",
             "no seabed"
@@ -262,7 +250,8 @@ def detect_failure_from_message(msg: str):
     }
 
     for key, keywords in mapping.items():
-        if any(k in msg for k in keywords):
-            return key
+        for k in keywords:
+            if all(word in msg for word in k.split()):
+                return key
 
     return None
