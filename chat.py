@@ -562,12 +562,16 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # ---------------------------------------
     if not answer_found and (partner_name or is_troubleshooting_candidate(message)):
 
-        troubleshoot = run_troubleshooting(
-            user_id,
-            message,
-            supabase_admin,
-            partner_name or "general"
-        )
+        try:
+            troubleshoot = run_troubleshooting(
+                user_id,
+                message,
+                supabase_admin,
+                partner_name or "general"
+            )
+        except Exception as e:
+            print("❌ TROUBLESHOOTING CRASH:", e)
+            troubleshoot = None
 
         if troubleshoot:
             return {
