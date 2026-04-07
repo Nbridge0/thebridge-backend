@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from typing import Optional
-from troubleshooting import run_troubleshooting, detect_system_from_message, TROUBLESHOOTING_SESSIONS
+from troubleshooting import run_troubleshooting, TROUBLESHOOTING_SESSIONS
 
 # -------------------------------
 # ENV
@@ -282,31 +282,6 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 # CORE CHAT LOGIC (UPDATED)
 # -------------------------------
 
-def detect_partner_from_chunks(semantic_results):
-    if not semantic_results:
-        return None
-
-    # group by partner_id and count hits
-    counts = {}
-    for row in semantic_results:
-        pid = row["partner_id"]
-        counts[pid] = counts.get(pid, 0) + 1
-
-    # pick most relevant partner
-    best_partner_id = max(counts, key=counts.get)
-
-    # fetch partner name
-    try:
-        partner = supabase_admin.table("partners") \
-            .select("badge_label") \
-            .eq("id", best_partner_id) \
-            .single() \
-            .execute()
-
-        return partner.data["badge_label"]
-    except:
-        return None
-
 def get_chat_history(chat_id: int, limit: int = 15):
     """
     Fetches previous chat messages for context memory.
@@ -458,6 +433,23 @@ def is_troubleshooting_candidate(message: str) -> bool:
 
     return any(p in msg for p in problem_signals)
 
+
+def detect_system(message: str):
+    msg = message.lower()
+
+    systems = {
+        "power_module": ["power module", "power", "led", "fuse"],
+        "transducer": ["transducer", "sonar", "capacitance"],
+        "network": ["network", "ip", "ping", "ethernet"],
+        "computer": ["computer", "software", "sonasoft"]
+    }
+
+    for system, keywords in systems.items():
+        if any(k in msg for k in keywords):
+            return system
+
+    return None
+
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -486,91 +478,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("EMBEDDING ERROR:", e)
         embedding = None
 
-
-    # =====================================================
-    # 🛠 TROUBLESHOOTING (SCALABLE VERSION)  ← ✅ FIXED POSITION
-    # =====================================================
-    user_id = str(chat_id) if chat_id else "guest_session"
-
-    partner_name = None
-
-    if embedding:
-        try:
-            semantic_results = supabase_admin.rpc(
-                "match_partner_chunks",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.6,  # 🔥 slightly lower
-                    "match_count": 5
-                }
-            ).execute().data
-
-            partner_name = detect_partner_from_chunks(semantic_results)
-
-            print("DEBUG → partner_name:", partner_name)
-
-        except Exception as e:
-            print("PARTNER DETECTION ERROR:", e)
-
-
-    # ---------------------------------------
-    # CONTINUE SESSION
-    # ---------------------------------------
-    if user_id in TROUBLESHOOTING_SESSIONS:
-
-        normalized = message.lower().strip()
-
-        if any(x in normalized for x in ["yes", "y", "no", "n", "exit"]):
-            troubleshoot = run_troubleshooting(
-                user_id,
-                message,
-                supabase_admin,
-                TROUBLESHOOTING_SESSIONS[user_id].get("partner_name")
-            )
-
-            if troubleshoot:
-                return {
-                    "answer": troubleshoot["answer"],
-                    "source": troubleshoot["source"],
-                    "badge": troubleshoot.get("badge"),
-                    "actions": [],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-
-        else:
-            # user broke the flow → reset
-            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-    system_detected = detect_system_from_message(message)
-    
-    print("DEBUG → message:", message)
-    print("DEBUG → system_detected:", system_detected)
-    print("DEBUG → partner_name:", partner_name)
-    # ---------------------------------------
-    # START NEW SESSION
-    # ---------------------------------------
-    if not answer_found and (system_detected or is_troubleshooting_candidate(message)):
-
-        try:
-            troubleshoot = run_troubleshooting(
-                user_id,
-                message,
-                supabase_admin,
-                partner_name or system_detected
-            )
-        except Exception as e:
-            print("❌ TROUBLESHOOTING CRASH:", e)
-            troubleshoot = None
-
-        if troubleshoot:
-            return {
-                "answer": troubleshoot["answer"],
-                "source": troubleshoot["source"],
-                "badge": troubleshoot.get("badge"),
-                "actions": [],
-                "requires_auth": False,
-                "new_title": None
-             }
     # =====================================================
     # 1️⃣ THEBRIDGE QA
     # =====================================================
@@ -743,7 +650,51 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
+ # =====================================================
+# 🛠 TROUBLESHOOTING (FINAL)
+# =====================================================
 
+    user_id = str(chat_id) if chat_id else "guest_session"
+
+# ---------------------------------------
+# 1️⃣ CONTINUE EXISTING SESSION
+# ---------------------------------------
+    if user_id in TROUBLESHOOTING_SESSIONS:
+
+        # allow user to exit naturally if they change topic
+        if not is_troubleshooting_candidate(message) and message.lower() not in ["yes", "no", "y", "n", "exit"]:
+            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+        else:
+            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+            if troubleshoot:
+                return {
+                    "answer": troubleshoot["answer"],
+                    "source": troubleshoot["source"],
+                    "badge": troubleshoot.get("badge"),
+                    "actions": [],
+                    "requires_auth": False,
+                    "new_title": None
+                }
+
+# ---------------------------------------
+# 2️⃣ START NEW SESSION (ONLY IF NO ANSWER FOUND)
+# ---------------------------------------
+    if not answer_found:
+        system = detect_system(message)
+
+        if system and (is_troubleshooting_candidate(message) or not answer_found):
+            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
+
+            if troubleshoot:
+                return {
+                    "answer": troubleshoot["answer"],
+                    "source": troubleshoot["source"],
+                    "badge": troubleshoot.get("badge"),
+                    "actions": [],
+                    "requires_auth": False,
+                    "new_title": None
+                }
     # =====================================================
     # 5️⃣ YACHTING FALLBACK
     # =====================================================
