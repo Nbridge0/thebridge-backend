@@ -858,7 +858,7 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
     user_name = get_user_name_by_email(user_email)
 
     expert = supabase_admin.table("experts") \
-        .select("name, email") \
+        .select("name, email, contact_name") \
         .eq("email", expert_email) \
         .single() \
         .execute()
@@ -867,7 +867,7 @@ def send_help_request(role: str, question: str, user_email: str, expert_email: s
         return {"status": "expert_not_found"}
 
     body = HELP_EMAIL_BODY.format(
-        expert_name=expert.data["name"],
+        expert_name=expert.data.get("contact_name") or expert.data["name"],
         name=user_name,
         role=role,
         question=question
