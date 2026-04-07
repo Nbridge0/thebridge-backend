@@ -8,7 +8,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from typing import Optional
-from troubleshooting import run_troubleshooting, TROUBLESHOOTING_SESSIONS
+from troubleshooting import run_troubleshooting, detect_system_from_message, TROUBLESHOOTING_SESSIONS
 
 # -------------------------------
 # ENV
@@ -458,23 +458,6 @@ def is_troubleshooting_candidate(message: str) -> bool:
 
     return any(p in msg for p in problem_signals)
 
-
-def detect_system(message: str):
-    msg = message.lower()
-
-    systems = {
-        "power_module": ["power module", "power", "led", "fuse"],
-        "transducer": ["transducer", "sonar", "capacitance"],
-        "network": ["network", "ip", "ping", "ethernet"],
-        "computer": ["computer", "software", "sonasoft"]
-    }
-
-    for system, keywords in systems.items():
-        if any(k in msg for k in keywords):
-            return system
-
-    return None
-
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -535,14 +518,14 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # ---------------------------------------
     if user_id in TROUBLESHOOTING_SESSIONS:
 
-        if message.lower() not in ["yes", "no", "y", "n", "exit"]:
-            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
-        else:
+        normalized = message.lower().strip()
+
+        if any(x in normalized for x in ["yes", "y", "no", "n", "exit"]):
             troubleshoot = run_troubleshooting(
                 user_id,
                 message,
                 supabase_admin,
-                TROUBLESHOOTING_SESSIONS[user_id]["partner_name"]
+                TROUBLESHOOTING_SESSIONS[user_id].get("partner_name")
             )
 
             if troubleshoot:
@@ -555,19 +538,25 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
+        else:
+            # user broke the flow → reset
+            TROUBLESHOOTING_SESSIONS.pop(user_id, None)
+    system_detected = detect_system_from_message(message)
+    
+    print("DEBUG → message:", message)
+    print("DEBUG → system_detected:", system_detected)
     print("DEBUG → partner_name:", partner_name)
-    print("DEBUG → is_troubleshooting:", is_troubleshooting_candidate(message))
     # ---------------------------------------
     # START NEW SESSION
     # ---------------------------------------
-    if not answer_found and (partner_name or is_troubleshooting_candidate(message)):
+    if not answer_found and (system_detected or is_troubleshooting_candidate(message)):
 
         try:
             troubleshoot = run_troubleshooting(
                 user_id,
                 message,
                 supabase_admin,
-                partner_name or "general"
+                partner_name or system_detected
             )
         except Exception as e:
             print("❌ TROUBLESHOOTING CRASH:", e)
@@ -581,7 +570,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "actions": [],
                 "requires_auth": False,
                 "new_title": None
-            }
+             }
     # =====================================================
     # 1️⃣ THEBRIDGE QA
     # =====================================================
