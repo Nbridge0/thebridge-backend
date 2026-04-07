@@ -555,17 +555,18 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
-
+    print("DEBUG → partner_name:", partner_name)
+    print("DEBUG → is_troubleshooting:", is_troubleshooting_candidate(message))
     # ---------------------------------------
     # START NEW SESSION
     # ---------------------------------------
-    if not answer_found and partner_name:
+    if not answer_found and (partner_name or is_troubleshooting_candidate(message)):
 
         troubleshoot = run_troubleshooting(
             user_id,
             message,
             supabase_admin,
-            partner_name
+            partner_name or "general"
         )
 
         if troubleshoot:
@@ -577,7 +578,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "requires_auth": False,
                 "new_title": None
             }
-
     # =====================================================
     # 1️⃣ THEBRIDGE QA
     # =====================================================
