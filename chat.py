@@ -277,6 +277,18 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 
     return r.choices[0].message.content.strip()
 
+def normalize_question_for_search(question: str) -> str:
+    q = question.lower()
+
+    # remove personal/context noise words
+    noise_words = [
+        "my", "your", "our", "the", "a", "an"
+    ]
+
+    words = q.split()
+    cleaned = [w for w in words if w not in noise_words]
+
+    return " ".join(cleaned)
 
 # -------------------------------
 # CORE CHAT LOGIC (UPDATED)
@@ -496,9 +508,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # 2️⃣ EMBEDDING
     # =====================================================
     try:
+        cleaned_question = normalize_question_for_search(message)
+
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
-            input=message
+            input=cleaned_question
         ).data[0].embedding
     except Exception as e:
         print("EMBEDDING ERROR:", e)
@@ -589,7 +603,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_chunks",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.72,
+                    "match_threshold": 0.68,
                     "match_count": 8
                 }
             ).execute().data
