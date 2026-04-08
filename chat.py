@@ -269,6 +269,8 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
         "content": question
     })
 
+    messages = messages[-12:]
+
     r = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
@@ -315,11 +317,11 @@ def get_chat_history(chat_id: int, limit: int = 15):
             if msg["role"] in ["user", "assistant"]:
                 history.append({
                     "role": msg["role"],
-                    "content": msg["content"]
+                    "content": truncate(msg["content"])
                 })
 
         # Keep only last N messages for token control
-        return history[-20:]
+        return history[-8:]
 
     except Exception as e:
         print("HISTORY ERROR:", e)
@@ -387,6 +389,9 @@ def remove_redundant_prefixes(text: str) -> str:
         first_line = False
 
     return "\n\n".join(cleaned)
+
+def truncate(text, max_chars=1200):
+    return text[:max_chars]
 
 def enforce_yes_no(question: str, answer: str) -> str:
     q = question.lower().strip()
@@ -746,6 +751,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
+
+    messages = messages[-12:]
 
     try:
         response = client.chat.completions.create(
