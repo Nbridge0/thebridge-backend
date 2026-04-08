@@ -269,8 +269,6 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
         "content": question
     })
 
-    messages = messages[-12:]
-
     r = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
@@ -317,11 +315,11 @@ def get_chat_history(chat_id: int, limit: int = 15):
             if msg["role"] in ["user", "assistant"]:
                 history.append({
                     "role": msg["role"],
-                    "content": truncate(msg["content"])
+                    "content": msg["content"]
                 })
 
         # Keep only last N messages for token control
-        return history[-8:]
+        return history[-20:]
 
     except Exception as e:
         print("HISTORY ERROR:", e)
@@ -389,9 +387,6 @@ def remove_redundant_prefixes(text: str) -> str:
         first_line = False
 
     return "\n\n".join(cleaned)
-
-def truncate(text, max_chars=1200):
-    return text[:max_chars]
 
 def enforce_yes_no(question: str, answer: str) -> str:
     q = question.lower().strip()
@@ -574,8 +569,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
                 partner_name = "Partner"
-                
+
             answer = enforce_yes_no(message, row["answer"])
+
             return {
                 "answer": answer,
                 "source": "partner_qa",
@@ -752,8 +748,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 
-    messages = messages[-12:]
-
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -761,29 +755,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             temperature=0.7
         )
         answer = response.choices[0].message.content.strip()
+        answer = enforce_yes_no(message, answer)
     except Exception as e:
         print("OPENAI ERROR:", e)
-
-        # 🔁 fallback using simpler prompt
-        try:
-            fallback_messages = [
-                {"role": "system", "content": "You are helpful."},
-                {"role": "user", "content": message}
-            ]
-
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=fallback_messages,
-                temperature=0.7
-            )
-
-            answer = response.choices[0].message.content.strip()
-
-        except Exception as e2:
-            print("FALLBACK FAIL:", e2)
-
-            # 🔥 FINAL GUARANTEE (NEVER EMPTY)
-            answer = f"Here’s a clear answer: {message.capitalize()} — generally yes, depending on context."
+        answer = "⚠️ AI temporary error. Please try again."
 
     return {
         "answer": answer,
