@@ -20,8 +20,7 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-FROM_EMAIL = os.getenv("FROM_EMAIL") 
-
+FROM_EMAIL = os.getenv("FROM_EMAIL")
 
 openai.api_key = OPENAI_API_KEY
 
@@ -114,28 +113,6 @@ def normalize(text: str) -> str:
     return text.strip().lower().translate(
         str.maketrans("", "", string.punctuation)
     )
-
-def lightly_format_partner_answer(question: str, answer: str) -> str:
-    q = question.lower()
-
-    is_yes_no = any(q.startswith(w) for w in [
-        "is", "are", "does", "do", "can", "should", "will"
-    ])
-
-    if not is_yes_no:
-        return answer
-
-    a_lower = answer.lower().strip()
-
-    if a_lower.startswith(("yes", "no")):
-        return answer
-
-    if any(word in a_lower for word in ["not", "no", "does not", "cannot", "may not"]):
-        prefix = "No, "
-    else:
-        prefix = "Yes, "
-
-    return prefix + answer
 
 def semantic_partner_match(question: str):
 
@@ -400,46 +377,48 @@ def remove_redundant_prefixes(text: str) -> str:
     return "\n\n".join(cleaned)
 
 def generate_contextual_answer(question: str, context_chunks: list, history: list):
-    context = "\n\n".join(context_chunks[:3])
+    context = context_chunks[0]  # ✅ ONLY ONE CHUNK
 
     messages = [
         {
             "role": "system",
             "content": (
                 "You are TheBridge AI.\n\n"
-                "Answer the user's question using the provided context.\n\n"
 
-                "RULES:\n"
-                "- If the question is YES/NO → start with Yes or No.\n"
-                "- Then explain clearly.\n"
-                "- Be natural and direct.\n"
-                "- Do NOT copy the context.\n"
-                "- Adapt the answer to the question.\n"
+                "You MUST use the provided context EXACTLY.\n\n"
+
+                "CRITICAL RULES:\n"
+                "- DO NOT rewrite or paraphrase the context.\n"
+                "- DO NOT summarize.\n"
+                "- DO NOT change wording.\n"
+                "- DO NOT remove details.\n\n"
+
+                "You are ONLY allowed to:\n"
+                "- Add 'Yes, ' or 'No, ' at the beginning if needed\n"
+                "- Slightly adjust ONLY the first sentence if required\n\n"
+
+                "Return the original text EXACTLY.\n"
             )
-        }
-    ]
-
-    messages.extend(history)
-
-    messages.append({
-        "role": "user",
-        "content": f"""
+        },
+        {
+            "role": "user",
+            "content": f"""
 Question:
 {question}
 
 Context:
 {context}
 """
-    })
+        }
+    ]
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
-        temperature=0.3
+        temperature=0  # ✅ VERY IMPORTANT
     )
 
     return response.choices[0].message.content.strip()
-
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
 
@@ -617,9 +596,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
 
-                raw_answer = filtered[0] if filtered else chunks[0]
-
-                answer = lightly_format_partner_answer(message, raw_answer)
+                answer = generate_contextual_answer(message, filtered, history)
 
                 formatted_answers.append({
                     "partner_name": partner_name,
@@ -726,7 +703,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         "requires_auth": False,
         "new_title": None
     }
-
 
 def save_message(chat_id, role, content, source, user_email=None):
     supabase_admin.table("chat_messages").insert({
