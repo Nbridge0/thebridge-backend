@@ -455,7 +455,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     user_norm = normalize(message)
 
     # =====================================================
-    # HISTORY
+    # 1️⃣ HISTORY
     # =====================================================
     if not chat_id:
         history = history or []
@@ -464,10 +464,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
     answer_found = False
-   
 
     # =====================================================
-    # EMBEDDING
+    # 2️⃣ EMBEDDING
     # =====================================================
     try:
         embedding = client.embeddings.create(
@@ -479,7 +478,48 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         embedding = None
 
     # =====================================================
-    # 1️⃣ THEBRIDGE QA
+    # 3️⃣ PARTNER QA (FIRST PRIORITY)
+    # =====================================================
+    if embedding:
+        try:
+            qa_results = supabase_admin.rpc(
+                "match_partner_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.70,  # slightly lower for better trigger
+                    "match_count": 1
+                }
+            ).execute().data
+        except Exception as e:
+            print("PARTNER QA ERROR:", e)
+            qa_results = []
+
+        if qa_results:
+            row = qa_results[0]
+
+            try:
+                partner = supabase_admin.table("partners") \
+                    .select("badge_label") \
+                    .eq("id", row["partner_id"]) \
+                    .single() \
+                    .execute()
+
+                partner_name = partner.data["badge_label"] if partner.data else "Partner"
+            except Exception as e:
+                print("PARTNER FETCH ERROR:", e)
+                partner_name = "Partner"
+
+            return {
+                "answer": row["answer"],
+                "source": "partner_qa",
+                "badge": partner_name,
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # =====================================================
+    # 4️⃣ THEBRIDGE QA
     # =====================================================
     if embedding:
         try:
@@ -503,7 +543,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
             answer = generate_contextual_answer(message, filtered, history)
             answer = adjust_plurality(answer, message)
-            answer_found = True
+
             return {
                 "answer": answer,
                 "source": "bridge_semantic_raw",
@@ -514,84 +554,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 2️⃣ PARTNER QA (FIXED)
-    # =====================================================
-    if embedding:
-        try:
-            qa_results = supabase_admin.rpc(
-                "match_partner_qa",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.75,
-                    "match_count": 1
-                }
-            ).execute().data
-        except Exception as e:
-            print("PARTNER QA ERROR:", e)
-            qa_results = []
-
-        if qa_results:
-            answer_found = True
-            row = qa_results[0]
-
-            # ✅ fetch partner name from partners table
-            try:
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", row["partner_id"]) \
-                    .single() \
-                    .execute()
-
-                partner_name = partner.data["badge_label"] if partner.data else "Partner"
-            except Exception as e:
-                print("PARTNER FETCH ERROR:", e)
-                partner_name = "Partner"
-
-            return {
-                "answer": row["answer"],
-                "source": "partner_qa",
-                "badge": partner_name,
-                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                "requires_auth": False,
-                "new_title": None
-            }
-
-    # =====================================================
-    # 3️⃣ THEBRIDGE DOCS
-    # =====================================================
-    if embedding:
-        try:
-            bridge_results = supabase_admin.rpc(
-                "match_bridge_chunks",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.65,
-                    "match_count": 8
-                }
-            ).execute().data
-        except Exception as e:
-            print("BRIDGE DOC ERROR:", e)
-            bridge_results = []
-
-        if bridge_results:
-            answer_found = True
-            chunks = [row["content"] for row in bridge_results]
-            cleaned = clean_chunks(chunks)
-            filtered = filter_chunks(cleaned, message)
-
-            answer = generate_contextual_answer(message, filtered, history)
-
-            return {
-                "answer": answer,
-                "source": "bridge_docs_raw",
-                "badge": "TheBridge",
-                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                "requires_auth": False,
-                "new_title": None
-            }
-
-    # =====================================================
-    # 4️⃣ PARTNER DOCS (FIXED CONSISTENCY)
+    # 5️⃣ PARTNER DOCS
     # =====================================================
     if embedding:
         try:
@@ -611,8 +574,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
             grouped = {}
             for row in semantic_results:
-                pid = row["partner_id"]
-                grouped.setdefault(pid, []).append(row["content"])
+                grouped.setdefault(row["partner_id"], []).append(row["content"])
 
             formatted_answers = []
 
@@ -640,7 +602,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 })
 
             if formatted_answers:
-                answer_found = True
                 return {
                     "answers": formatted_answers,
                     "source": "partner_docs_raw",
@@ -650,23 +611,49 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
- # =====================================================
-# 🛠 TROUBLESHOOTING (FINAL)
-# =====================================================
+    # =====================================================
+    # 6️⃣ THEBRIDGE DOCS
+    # =====================================================
+    if embedding:
+        try:
+            bridge_results = supabase_admin.rpc(
+                "match_bridge_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.65,
+                    "match_count": 8
+                }
+            ).execute().data
+        except Exception as e:
+            print("BRIDGE DOC ERROR:", e)
+            bridge_results = []
 
+        if bridge_results:
+            chunks = [row["content"] for row in bridge_results]
+            cleaned = clean_chunks(chunks)
+            filtered = filter_chunks(cleaned, message)
+
+            answer = generate_contextual_answer(message, filtered, history)
+
+            return {
+                "answer": answer,
+                "source": "bridge_docs_raw",
+                "badge": "TheBridge",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    # =====================================================
+    # 7️⃣ TROUBLESHOOTING + FALLBACK + AI
+    # =====================================================
     user_id = str(chat_id) if chat_id else "guest_session"
 
-# ---------------------------------------
-# 1️⃣ CONTINUE EXISTING SESSION
-# ---------------------------------------
     if user_id in TROUBLESHOOTING_SESSIONS:
-
-        # allow user to exit naturally if they change topic
-        if not is_troubleshooting_candidate(message) and message.lower() not in ["yes", "no", "y", "n", "exit"]:
+        if not is_troubleshooting_candidate(message):
             TROUBLESHOOTING_SESSIONS.pop(user_id, None)
         else:
             troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
             if troubleshoot:
                 return {
                     "answer": troubleshoot["answer"],
@@ -677,31 +664,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
-# ---------------------------------------
-# 2️⃣ START NEW SESSION (ONLY IF NO ANSWER FOUND)
-# ---------------------------------------
-    if not answer_found:
-        system = detect_system(message)
-
-        if system and (is_troubleshooting_candidate(message) or not answer_found):
-            troubleshoot = run_troubleshooting(user_id, message, supabase_admin)
-
-            if troubleshoot:
-                return {
-                    "answer": troubleshoot["answer"],
-                    "source": troubleshoot["source"],
-                    "badge": troubleshoot.get("badge"),
-                    "actions": [],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-    # =====================================================
-    # 5️⃣ YACHTING FALLBACK
-    # =====================================================
     yachting_keywords = [
-        "yacht", "crew", "captain", "flag", "port state", "psc",
-        "manning", "inspection", "maritime", "ism", "isps",
-        "engine", "bridge", "deck", "charter", "mca", "class"
+        "yacht", "crew", "captain", "flag", "port state",
+        "manning", "inspection", "maritime"
     ]
 
     if any(k in user_norm for k in yachting_keywords):
@@ -713,9 +678,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             "new_title": None
         }
 
-    # =====================================================
-    # 6️⃣ AI RESPONSE
-    # =====================================================
+    # AI fallback
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
@@ -731,41 +694,12 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
 
-    # =====================================================
-    # 7️⃣ AUTO TITLE
-    # =====================================================
-    new_title = None
-
-    if chat_id:
-        try:
-            existing_messages = get_chat_history(chat_id)
-
-            if len(existing_messages) <= 1:
-                title_resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "Create a short 4-6 word title summarizing this topic."},
-                        {"role": "user", "content": message}
-                    ],
-                    temperature=0.3
-                )
-
-                new_title = title_resp.choices[0].message.content.strip()
-
-                supabase_admin.table("user_chats") \
-                    .update({"title": new_title}) \
-                    .eq("id", chat_id) \
-                    .execute()
-
-        except Exception as e:
-            print("TITLE ERROR:", e)
-
     return {
         "answer": answer,
         "source": "openai_general",
         "actions": [],
         "requires_auth": False,
-        "new_title": new_title
+        "new_title": None
     }
 
 
