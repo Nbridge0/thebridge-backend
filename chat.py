@@ -378,24 +378,34 @@ def remove_redundant_prefixes(text: str) -> str:
 
 def lightly_format_partner_answer(question: str, answer: str) -> str:
     q = question.lower().strip()
+    a = answer.strip()
+    a_lower = a.lower()
 
-    is_yes_no = any(q.startswith(w) for w in [
+    # 1️⃣ Only consider YES/NO questions (STRICT)
+    is_yes_no = any(q.startswith(w + " ") for w in [
         "is", "are", "does", "do", "can", "should", "will"
     ])
 
     if not is_yes_no:
-        return answer
+        return a
 
-    a_lower = answer.lower()
+    # 2️⃣ If answer already starts naturally → DON'T TOUCH
+    natural_starts = [
+        "yes", "no",
+        "fortunately", "typically", "generally",
+        "in most", "many", "some", "often"
+    ]
 
-    if a_lower.startswith(("yes", "no")):
-        return answer
+    if any(a_lower.startswith(w) for w in natural_starts):
+        return a
 
-    if any(word in a_lower for word in ["not", "no", "does not", "cannot", "may not"]):
-        return "No, " + answer
+    # 3️⃣ Only add Yes/No if it's CLEAR
+    negative_signals = [" not ", " no ", "does not", "cannot", "may not"]
+
+    if any(w in a_lower for w in negative_signals):
+        return "No, " + a
     else:
-        return "Yes, " + answer
-
+        return "Yes, " + a
 def generate_contextual_answer(question: str, context_chunks: list, history: list):
     context = context_chunks[0]  # ✅ ONLY ONE CHUNK
 
