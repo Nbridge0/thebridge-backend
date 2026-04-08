@@ -20,7 +20,8 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-FROM_EMAIL = os.getenv("FROM_EMAIL")
+FROM_EMAIL = os.getenv("FROM_EMAIL") 
+
 
 openai.api_key = OPENAI_API_KEY
 
@@ -113,6 +114,28 @@ def normalize(text: str) -> str:
     return text.strip().lower().translate(
         str.maketrans("", "", string.punctuation)
     )
+
+def lightly_format_partner_answer(question: str, answer: str) -> str:
+    q = question.lower()
+
+    is_yes_no = any(q.startswith(w) for w in [
+        "is", "are", "does", "do", "can", "should", "will"
+    ])
+
+    if not is_yes_no:
+        return answer
+
+    a_lower = answer.lower().strip()
+
+    if a_lower.startswith(("yes", "no")):
+        return answer
+
+    if any(word in a_lower for word in ["not", "no", "does not", "cannot", "may not"]):
+        prefix = "No, "
+    else:
+        prefix = "Yes, "
+
+    return prefix + answer
 
 def semantic_partner_match(question: str):
 
@@ -594,7 +617,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
 
-                answer = generate_contextual_answer(message, filtered, history)
+                raw_answer = filtered[0] if filtered else chunks[0]
+
+                answer = lightly_format_partner_answer(message, raw_answer)
 
                 formatted_answers.append({
                     "partner_name": partner_name,
