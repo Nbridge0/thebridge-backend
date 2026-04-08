@@ -407,7 +407,7 @@ def lightly_format_partner_answer(question: str, answer: str) -> str:
     else:
         return "Yes, " + a
 def generate_contextual_answer(question: str, context_chunks: list, history: list):
-    context = context_chunks[0]  # ✅ ONLY ONE CHUNK
+    context = context_chunks[0]
 
     messages = [
         {
@@ -415,19 +415,14 @@ def generate_contextual_answer(question: str, context_chunks: list, history: lis
             "content": (
                 "You are TheBridge AI.\n\n"
 
-                "You MUST use the provided context EXACTLY.\n\n"
+                "Use the provided context to answer the question.\n\n"
 
-                "CRITICAL RULES:\n"
-                "- DO NOT rewrite or paraphrase the context.\n"
-                "- DO NOT summarize.\n"
-                "- DO NOT change wording.\n"
-                "- DO NOT remove details.\n\n"
-
-                "You are ONLY allowed to:\n"
-                "- Add 'Yes, ' or 'No, ' at the beginning if needed\n"
-                "- Slightly adjust ONLY the first sentence if required\n\n"
-
-                "Return the original text EXACTLY.\n"
+                "STRICT RULES:\n"
+                "- DO NOT add 'Yes' or 'No' unless the context already clearly implies it\n"
+                "- DO NOT force Yes/No answers\n"
+                "- DO NOT change the meaning of the text\n"
+                "- Keep wording as close as possible to the original context\n"
+                "- Only slightly adapt the first sentence if needed\n"
             )
         },
         {
@@ -445,7 +440,7 @@ Context:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
-        temperature=0  # ✅ VERY IMPORTANT
+        temperature=0
     )
 
     return response.choices[0].message.content.strip()
