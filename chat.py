@@ -388,12 +388,12 @@ def remove_redundant_prefixes(text: str) -> str:
 
     return "\n\n".join(cleaned)
 
-def lightly_format_partner_answer(question: str, answer: str) -> str:
+def enforce_yes_no(question: str, answer: str) -> str:
     q = question.lower().strip()
     a = answer.strip()
     a_lower = a.lower()
 
-    # 1️⃣ Only consider YES/NO questions (STRICT)
+    # 1️⃣ Detect yes/no question
     is_yes_no = any(q.startswith(w + " ") for w in [
         "is", "are", "does", "do", "can", "should", "will"
     ])
@@ -401,23 +401,43 @@ def lightly_format_partner_answer(question: str, answer: str) -> str:
     if not is_yes_no:
         return a
 
-    # 2️⃣ If answer already starts naturally → DON'T TOUCH
-    natural_starts = [
-        "yes", "no",
-        "fortunately", "typically", "generally",
-        "in most", "many", "some", "often"
-    ]
-
-    if any(a_lower.startswith(w) for w in natural_starts):
+    # 2️⃣ If already starts correctly → keep it
+    if a_lower.startswith(("yes", "no")):
         return a
 
-    # 3️⃣ Only add Yes/No if it's CLEAR
-    negative_signals = [" not ", " no ", "does not", "cannot", "may not"]
+    # 3️⃣ Strong NEGATIVE detection
+    negative_patterns = [
+        "not", "no", "never", "cannot", "can't",
+        "does not", "do not", "is not", "are not",
+        "will not", "should not"
+    ]
 
-    if any(w in a_lower for w in negative_signals):
+    # 4️⃣ Strong POSITIVE detection
+    positive_patterns = [
+        "designed to",
+        "safe",
+        "compliant",
+        "approved",
+        "allowed",
+        "can be",
+        "is able to",
+        "are able to",
+        "supports",
+        "provides"
+    ]
+
+    is_negative = any(p in a_lower for p in negative_patterns)
+    is_positive = any(p in a_lower for p in positive_patterns)
+
+    # 5️⃣ Decide
+    if is_negative and not is_positive:
         return "No, " + a
-    else:
+
+    if is_positive and not is_negative:
         return "Yes, " + a
+
+    # fallback → default YES (safer for your use case)
+    return "Yes, " + a
 def generate_contextual_answer(question: str, context_chunks: list, history: list):
     context = context_chunks[0]
 
@@ -549,9 +569,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
                 partner_name = "Partner"
-
+                
+            answer = enforce_yes_no(message, row["answer"])
             return {
-                "answer": row["answer"],
+                "answer": answer,
                 "source": "partner_qa",
                 "badge": partner_name,
                 "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
@@ -583,7 +604,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             filtered = [remove_redundant_prefixes(c) for c in filtered]
 
             answer = generate_contextual_answer(message, filtered, history)
-            answer = adjust_plurality(answer, message)
+            answer = enforce_yes_no(answer, message)
 
             return {
                 "answer": answer,
@@ -636,7 +657,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 filtered = filter_chunks(cleaned, message)
 
                 raw = filtered[0] if filtered else chunks[0]
-                answer = lightly_format_partner_answer(message, raw)
+                answer = enforce_yes_no(message, raw)
 
                 formatted_answers.append({
                     "partner_name": partner_name,
@@ -676,6 +697,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             filtered = filter_chunks(cleaned, message)
 
             answer = generate_contextual_answer(message, filtered, history)
+            answer = enforce_yes_no(message, answer)
 
             return {
                 "answer": answer,
