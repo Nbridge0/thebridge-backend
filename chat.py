@@ -279,8 +279,6 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
 
     return answer
 
-    return r.choices[0].message.content.strip()
-
 def normalize_question_for_search(question: str) -> str:
     q = question.lower()
 
@@ -483,13 +481,18 @@ Context:
         }
     ]
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,
+            timeout=10
+        )
+        return response.choices[0].message.content.strip()
 
-    return response.choices[0].message.content.strip()
+    except Exception as e:
+        print("CONTEXTUAL ANSWER ERROR:", e)
+        return context  # ✅ fallback to raw content instead of failing
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
 
@@ -532,7 +535,8 @@ def safe_openai_call(messages, chat_id=None, history=None, user_message=None):
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    temperature=0.7
+                    temperature=0.7,
+                    timeout=10  # ✅ ADD THIS (CRITICAL)
                 )
                 return response.choices[0].message.content.strip()
 
@@ -540,13 +544,12 @@ def safe_openai_call(messages, chat_id=None, history=None, user_message=None):
                 print(f"{model} ERROR (attempt {attempt+1}):", e)
                 time.sleep(1.5 * (attempt + 1))
 
-    # 🔥 FINAL FALLBACK (never fail)
-    try:
-        return ask_ai_only(user_message, chat_id, history)
-    except Exception as e:
-        print("FALLBACK ERROR:", e)
-        return "Here’s what I can tell you based on general knowledge..."
-
+    # FINAL fallback (NO recursion!)
+    return (
+        "Let me continue that for you:\n\n"
+        "Based on general knowledge, here's a helpful explanation:\n\n"
+        + (user_message or "")
+    )
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
