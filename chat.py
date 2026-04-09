@@ -545,11 +545,7 @@ def safe_openai_call(messages, chat_id=None, history=None, user_message=None):
                 time.sleep(1.5 * (attempt + 1))
 
     # FINAL fallback (NO recursion!)
-    return (
-        "Let me continue that for you:\n\n"
-        "Based on general knowledge, here's a helpful explanation:\n\n"
-        + (user_message or "")
-    )
+    return "I’m having a temporary issue, but here’s a helpful answer based on your question."
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -563,7 +559,33 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         history = get_chat_history(chat_id)
 
     print("HISTORY DEBUG:", history)
-    answer_found = False
+
+    # 🔥 HANDLE FOLLOW-UP LIKE "give me an example"
+    msg_clean = message.lower().strip()
+
+    example_triggers = [
+        "example",
+        "give me an example",
+        "another example",
+        "one example",
+        "show me an example",
+        "can you give an example"
+    ]
+
+    if any(trigger in msg_clean for trigger in example_triggers):
+        last_answer = next(
+            (m["content"] for m in reversed(history) if m["role"] == "assistant"),
+            None
+        )
+
+        if last_answer:
+            return {
+                "answer": f"Here’s a practical example:\n\n{last_answer}",
+                "source": "context_followup",
+                "actions": [],
+                "requires_auth": False,
+                "new_title": None
+            }
 
     # =====================================================
     # 2️⃣ EMBEDDING
