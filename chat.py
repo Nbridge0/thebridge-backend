@@ -290,6 +290,16 @@ def normalize_question_for_search(question: str) -> str:
 
     return " ".join(cleaned)
 
+
+def enrich_question(question: str) -> str:
+    q = question.lower()
+
+    # domain-specific expansions
+    if "deck" in q and "teak" not in q:
+        q += " teak deck"
+
+    return q
+
 # -------------------------------
 # CORE CHAT LOGIC (UPDATED)
 # -------------------------------
@@ -528,7 +538,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # 2️⃣ EMBEDDING
     # =====================================================
     try:
-        cleaned_question = normalize_question_for_search(message)
+        cleaned_question = normalize_question_for_search(
+            enrich_question(message)
+        )
 
         embedding = client.embeddings.create(
             model="text-embedding-3-small",
