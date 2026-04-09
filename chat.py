@@ -3,7 +3,6 @@ import random
 import string
 import secrets
 import requests
-import time
 import openai
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
@@ -227,6 +226,15 @@ def ask_openai(question: str) -> str:
     )
     return r.choices[0].message.content.strip()
 
+def enrich_question(question: str) -> str:
+    q = question.lower()
+
+    # domain-specific expansions
+    if "deck" in q and "teak" not in q:
+        q += " teak deck"
+
+    return q
+
 def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str:
 
     if not chat_id:
@@ -270,14 +278,13 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
         "content": question
     })
 
-    answer = safe_openai_call(
-        messages,
-        chat_id=chat_id,
-        history=history,
-        user_message=question
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.7,
     )
 
-    return answer
+    return r.choices[0].message.content.strip()
 
 def normalize_question_for_search(question: str) -> str:
     q = question.lower()
@@ -291,16 +298,6 @@ def normalize_question_for_search(question: str) -> str:
     cleaned = [w for w in words if w not in noise_words]
 
     return " ".join(cleaned)
-
-
-def enrich_question(question: str) -> str:
-    q = question.lower()
-
-    # domain-specific expansions
-    if "deck" in q and "teak" not in q:
-        q += " teak deck"
-
-    return q
 
 # -------------------------------
 # CORE CHAT LOGIC (UPDATED)
@@ -331,7 +328,7 @@ def get_chat_history(chat_id: int, limit: int = 15):
                 })
 
         # Keep only last N messages for token control
-        return history[-10:]
+        return history[-20:]
 
     except Exception as e:
         print("HISTORY ERROR:", e)
@@ -481,18 +478,13 @@ Context:
         }
     ]
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0,
-            timeout=10
-        )
-        return response.choices[0].message.content.strip()
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0
+    )
 
-    except Exception as e:
-        print("CONTEXTUAL ANSWER ERROR:", e)
-        return context  # ✅ fallback to raw content instead of failing
+    return response.choices[0].message.content.strip()
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
 
@@ -526,26 +518,6 @@ def detect_system(message: str):
 
     return None
 
-def safe_openai_call(messages, chat_id=None, history=None, user_message=None):
-    models = ["gpt-4o-mini", "gpt-3.5-turbo"]
-
-    for model in models:
-        for attempt in range(3):
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=0.7,
-                    timeout=10  # ✅ ADD THIS (CRITICAL)
-                )
-                return response.choices[0].message.content.strip()
-
-            except Exception as e:
-                print(f"{model} ERROR (attempt {attempt+1}):", e)
-                time.sleep(1.5 * (attempt + 1))
-
-    # FINAL fallback (NO recursion!)
-    return "I’m having a temporary issue, but here’s a helpful answer based on your question."
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -559,33 +531,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         history = get_chat_history(chat_id)
 
     print("HISTORY DEBUG:", history)
-
-    # 🔥 HANDLE FOLLOW-UP LIKE "give me an example"
-    msg_clean = message.lower().strip()
-
-    example_triggers = [
-        "example",
-        "give me an example",
-        "another example",
-        "one example",
-        "show me an example",
-        "can you give an example"
-    ]
-
-    if any(trigger in msg_clean for trigger in example_triggers):
-        last_answer = next(
-            (m["content"] for m in reversed(history) if m["role"] == "assistant"),
-            None
-        )
-
-        if last_answer:
-            return {
-                "answer": f"Here’s a practical example:\n\n{last_answer}",
-                "source": "context_followup",
-                "actions": [],
-                "requires_auth": False,
-                "new_title": None
-            }
+    answer_found = False
 
     # =====================================================
     # 2️⃣ EMBEDDING
@@ -813,14 +759,18 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 
-    answer = safe_openai_call(
-        messages,
-        chat_id=chat_id,
-        history=history,
-        user_message=message
-    )
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7
+        )
+        answer = response.choices[0].message.content.strip()
+        answer = enforce_yes_no(message, answer)
+    except Exception as e:
+        print("OPENAI ERROR:", e)
+        answer = "⚠️ AI temporary error. Please try again."
 
-    answer = enforce_yes_no(message, answer)
     return {
         "answer": answer,
         "source": "openai_general",
