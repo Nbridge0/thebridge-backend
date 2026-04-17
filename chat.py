@@ -673,6 +673,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
                 formatted_answers.append({
                     "partner_name": partner_name,
+                    "partner_id": partner_id,
                     "answer": answer
                 })
 
@@ -779,15 +780,15 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         "new_title": None
     }
 
-def save_message(chat_id, role, content, source, user_email=None):
+def save_message(chat_id, role, content, source, user_email=None, partner_name=None):
     supabase_admin.table("chat_messages").insert({
         "chat_id": chat_id,
         "user_email": user_email,
         "role": role,
         "content": content,
-        "source": source
+        "source": source,
+        "partner_name": partner_name 
     }).execute()
-
 
 def track_click(
     chat_id: Optional[int],

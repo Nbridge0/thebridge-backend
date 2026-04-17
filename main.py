@@ -344,6 +344,15 @@ def health():
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
+    # ✅ FIX: Ensure chat exists (important for suggested questions)
+    if req.chat_id is None and req.user_email:
+        new_chat = supabase_admin.table("user_chats").insert({
+            "user_email": req.user_email,
+            "title": "New Chat"
+        }).execute()
+
+        req.chat_id = new_chat.data[0]["id"]
+
     # Save user message
     if req.chat_id is not None:
         save_message(
@@ -374,7 +383,8 @@ def chat_message(req: ChatRequest):
                     "assistant",
                     ans.get("answer"),
                     result.get("source"),
-                    req.user_email
+                    req.user_email,
+                    ans.get("partner_name")
                 )
         return result
 
@@ -389,7 +399,8 @@ def chat_message(req: ChatRequest):
             "assistant",
             answer,
             source,
-            req.user_email
+            req.user_email,
+            result.get("badge")
         )
     return {
     "answer": answer,
