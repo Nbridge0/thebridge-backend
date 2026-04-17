@@ -785,8 +785,7 @@ def save_message(chat_id, role, content, source, user_email=None):
         "user_email": user_email,
         "role": role,
         "content": content,
-        "source": source,
-        "partner_name": partner_name
+        "source": source
     }).execute()
 
 
