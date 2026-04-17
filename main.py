@@ -367,6 +367,15 @@ def chat_message(req: ChatRequest):
 
     # ✅ MULTI-PARTNER SUPPORT
     if "answers" in result:
+        if req.chat_id is not None:
+            for ans in result["answers"]:
+                save_message(
+                    req.chat_id,
+                    "assistant",
+                    ans.get("answer"),
+                    result.get("source"),
+                    req.user_email
+                )
         return result
 
     answer = result.get("answer")
