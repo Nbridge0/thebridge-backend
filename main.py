@@ -345,7 +345,7 @@ def health():
 def chat_message(req: ChatRequest):
 
     # Save user message
-    if req.chat_id:
+    if req.chat_id is not None:
         save_message(
             req.chat_id,
             "user",
@@ -374,7 +374,7 @@ def chat_message(req: ChatRequest):
     actions = result.get("actions", [])
     requires_auth = result.get("requires_auth", False)
 
-    if req.chat_id:
+    if req.chat_id is not None:
         save_message(
             req.chat_id,
             "assistant",
@@ -382,7 +382,6 @@ def chat_message(req: ChatRequest):
             source,
             req.user_email
         )
-
     return {
     "answer": answer,
     "source": source,
