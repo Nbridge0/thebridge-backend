@@ -374,7 +374,8 @@ def chat_message(req: ChatRequest):
                     "assistant",
                     ans.get("answer"),
                     result.get("source"),
-                    req.user_email
+                    req.user_email,
+                    partner_name=ans.get("partner_name")
                 )
         return result
 
