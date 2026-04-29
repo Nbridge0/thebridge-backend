@@ -370,6 +370,7 @@ def filter_chunks(chunks, question):
 
     scored.sort(reverse=True)
     return [c for _, c in scored[:5]]
+
     
 def remove_redundant_prefixes(text: str) -> str:
     lines = text.split("\n\n")
@@ -518,6 +519,16 @@ def detect_system(message: str):
 
     return None
 
+def is_low_information_query(message: str) -> bool:
+    msg = message.strip().lower()
+
+    vague_phrases = [
+        "tell me more", "more", "continue",
+        "go on", "expand", "elaborate"
+    ]
+
+    return msg in vague_phrases
+
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -532,6 +543,49 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     print("HISTORY DEBUG:", history)
     answer_found = False
+
+    # =====================================================
+# 🔥 CONTEXT CONTINUATION
+# =====================================================
+    if is_low_information_query(message) and history:
+
+        last_assistant = None
+
+        for msg in reversed(history):
+            if msg["role"] == "assistant":
+                last_assistant = msg["content"]
+                break
+
+        if last_assistant:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Continue the previous answer using ONLY the same topic and context. "
+                            "Do not introduce new entities or guess unrelated meanings."
+                        )
+                    },
+                    {
+                        "role": "assistant",
+                        "content": last_assistant
+                    },
+                    {
+                        "role": "user",
+                        "content": message
+                    }
+                ],
+                temperature=0.3
+            )
+
+            return {
+                "answer": response.choices[0].message.content.strip(),
+                "source": "continuation",
+                "actions": [],
+                "requires_auth": False, 
+                "new_title": None
+            }
 
     # =====================================================
     # 2️⃣ EMBEDDING
