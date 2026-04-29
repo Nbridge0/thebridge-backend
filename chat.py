@@ -740,37 +740,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "requires_auth": False,
                     "new_title": None
                 }
-# =====================================================
-# 🔥 GENERIC PARTNER FALLBACK (ADD HERE)
-# =====================================================
-    if embedding and not semantic_results:
-
-        try:
-            partners = supabase_admin.table("partners") \
-                .select("id, badge_label") \
-                .execute()
-
-            for p in partners.data:
-                if p["badge_label"].lower() in message.lower():
-
-                    resp = supabase_admin.table("partner_chunks") \
-                        .select("content") \
-                        .eq("partner_id", p["id"]) \
-                        .limit(1) \
-                        .execute()
-
-                    if resp.data:
-                        return {
-                            "answer": resp.data[0]["content"],
-                            "source": "partner_fallback",
-                            "badge": p["badge_label"],
-                            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                            "requires_auth": False,
-                            "new_title": None
-                        } 
-
-        except Exception as e:
-            print("PARTNER FALLBACK ERROR:", e)
 
     # =====================================================
     # 6️⃣ THEBRIDGE DOCS
