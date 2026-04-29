@@ -636,7 +636,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_chunks",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.68,
+                    "match_threshold": 0.58,
                     "match_count": 8
                 }
             ).execute().data
