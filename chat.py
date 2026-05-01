@@ -3,8 +3,7 @@ import random
 import string
 import secrets
 import requests
-import openaiploy and then what?
-
+import openai
 import re
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
