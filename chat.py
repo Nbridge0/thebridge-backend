@@ -550,6 +550,50 @@ def get_partner_trigger_matches(message: str):
         print("PARTNER TRIGGER MATCH ERROR:", e)
         return []
 
+def generate_partner_answer(question: str, partner_name: str, context: str) -> str:
+    """
+    Generates a clean user-facing answer from partner context.
+    Prevents raw chunks from being shown directly.
+    """
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI.\n\n"
+                "Answer using ONLY the provided partner context.\n"
+                "Do not invent details.\n"
+                "Do not mention other partners.\n"
+                "Do not expose raw document text.\n"
+                "Write a short, clean, helpful answer.\n\n"
+                f"The relevant partner is: {partner_name}.\n\n"
+                "If the user asks where to buy, who to contact, who can help, "
+                "or which company/provider to use, refer them to the relevant partner directly.\n\n"
+                "If the context does not contain a precise answer, say that the question should be referred to the partner."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"""
+Question:
+{question}
+
+Partner:
+{partner_name}
+
+Partner context:
+{context}
+"""
+        }
+    ]
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0
+    )
+
+    return response.choices[0].message.content.strip()
+
 
 def answer_from_triggered_partners(
     message: str,
@@ -559,12 +603,24 @@ def answer_from_triggered_partners(
 ):
     """
     Search only the partners that were triggered by keywords.
-    This reduces hallucination and prevents the wrong partner from answering.
+    Then generate a clean answer instead of returning raw chunks.
     """
     partner_ids = [p["partner_id"] for p in triggered_partners]
     formatted_answers = []
 
+    question_lower = message.lower()
+
+    referral_intent_words = [
+        "where", "buy", "purchase", "supplier", "contact",
+        "who should", "who can", "recommend", "provider",
+        "company", "specialist", "partner", "help me"
+    ]
+
+    has_referral_intent = any(w in question_lower for w in referral_intent_words)
+
+    # =====================================================
     # 1. Try Partner QA first
+    # =====================================================
     if embedding:
         try:
             qa_results = supabase_admin.rpc(
@@ -581,16 +637,39 @@ def answer_from_triggered_partners(
                 if row.get("partner_id") in partner_ids
             ]
 
+            grouped_qa = {}
+
             for row in qa_results:
+                grouped_qa.setdefault(row["partner_id"], []).append(row["answer"])
+
+            for partner_id, answers in grouped_qa.items():
                 partner_info = next(
                     p for p in triggered_partners
-                    if p["partner_id"] == row["partner_id"]
+                    if p["partner_id"] == partner_id
                 )
 
+                partner_name = partner_info["partner_name"]
+
+                # If the user is asking where/who/buy/contact,
+                # do not return a random product/application answer.
+                if has_referral_intent:
+                    clean_answer = (
+                        f"For this, you should refer to {partner_name}. "
+                        f"They are the relevant TheBridge partner for this topic."
+                    )
+                else:
+                    context = "\n\n".join(answers[:3])
+
+                    clean_answer = generate_partner_answer(
+                        question=message,
+                        partner_name=partner_name,
+                        context=context
+                    )
+
                 formatted_answers.append({
-                    "partner_name": partner_info["partner_name"],
-                    "partner_id": row["partner_id"],
-                    "answer": enforce_yes_no(message, row["answer"])
+                    "partner_name": partner_name,
+                    "partner_id": partner_id,
+                    "answer": enforce_yes_no(message, clean_answer)
                 })
 
         except Exception as e:
@@ -606,7 +685,9 @@ def answer_from_triggered_partners(
             "new_title": None
         }
 
+    # =====================================================
     # 2. Try Partner Docs second
+    # =====================================================
     if embedding:
         try:
             doc_results = supabase_admin.rpc(
@@ -623,26 +704,47 @@ def answer_from_triggered_partners(
                 if row.get("partner_id") in partner_ids
             ]
 
-            grouped = {}
+            grouped_docs = {}
 
             for row in doc_results:
-                grouped.setdefault(row["partner_id"], []).append(row["content"])
+                grouped_docs.setdefault(row["partner_id"], []).append(row["content"])
 
-            for partner_id, chunks in grouped.items():
+            for partner_id, chunks in grouped_docs.items():
                 partner_info = next(
                     p for p in triggered_partners
                     if p["partner_id"] == partner_id
                 )
 
+                partner_name = partner_info["partner_name"]
+
                 cleaned = clean_chunks(chunks)
                 filtered = filter_chunks(cleaned, message)
 
-                raw = filtered[0] if filtered else cleaned[0]
+                selected_chunks = filtered[:3] if filtered else cleaned[:3]
+
+                if not selected_chunks:
+                    continue
+
+                # If the user is asking where/who/buy/contact,
+                # make it a referral instead of returning a random document chunk.
+                if has_referral_intent:
+                    clean_answer = (
+                        f"For this, you should refer to {partner_name}. "
+                        f"They are the relevant TheBridge partner for this topic."
+                    )
+                else:
+                    context = "\n\n".join(selected_chunks)
+
+                    clean_answer = generate_partner_answer(
+                        question=message,
+                        partner_name=partner_name,
+                        context=context
+                    )
 
                 formatted_answers.append({
-                    "partner_name": partner_info["partner_name"],
+                    "partner_name": partner_name,
                     "partner_id": partner_id,
-                    "answer": enforce_yes_no(message, raw)
+                    "answer": enforce_yes_no(message, clean_answer)
                 })
 
         except Exception as e:
@@ -658,7 +760,9 @@ def answer_from_triggered_partners(
             "new_title": None
         }
 
+    # =====================================================
     # 3. Partner was clearly triggered, but no answer found
+    # =====================================================
     partner_names = ", ".join([p["partner_name"] for p in triggered_partners])
 
     return {
