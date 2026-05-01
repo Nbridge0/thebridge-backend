@@ -3,7 +3,9 @@ import random
 import string
 import secrets
 import requests
-import openai
+import openaiploy and then what?
+
+import re
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
@@ -227,13 +229,7 @@ def ask_openai(question: str) -> str:
     return r.choices[0].message.content.strip()
 
 def enrich_question(question: str) -> str:
-    q = question.lower()
-
-    # domain-specific expansions
-    if "deck" in q and "teak" not in q:
-        q += " teak deck"
-
-    return q
+    return question.lower()
 
 def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str:
 
@@ -446,11 +442,13 @@ def enforce_yes_no(question: str, answer: str) -> str:
     if is_positive and not is_negative:
         return "Yes, " + a
 
-    # fallback → default YES (safer for your use case)
-    return "Yes, " + a
+    # fallback → do not invent Yes/No
+    return a
 def generate_contextual_answer(question: str, context_chunks: list, history: list):
-    context = context_chunks[0]
+    if not context_chunks:
+        return NO_ANSWER_FALLBACK
 
+    context = context_chunks[0]
     messages = [
         {
             "role": "system",
@@ -502,6 +500,179 @@ def is_troubleshooting_candidate(message: str) -> bool:
 
     return any(p in msg for p in problem_signals)
 
+def get_partner_trigger_matches(message: str):
+    """
+    Finds partners whose trigger words appear in the user's message.
+    Runs before semantic search so known partner categories route correctly.
+    """
+    try:
+        msg = normalize(message)
+
+        resp = supabase_admin.table("partner_triggers") \
+            .select("partner_id, trigger, partners(id, badge_label)") \
+            .eq("is_active", True) \
+            .execute()
+
+        rows = resp.data or []
+        matches = []
+
+        for row in rows:
+            trigger = row.get("trigger", "")
+            trigger_norm = normalize(trigger)
+
+            if not trigger_norm:
+                continue
+
+            pattern = r"\b" + re.escape(trigger_norm) + r"\b"
+
+            if re.search(pattern, msg):
+                partner = row.get("partners") or {}
+
+                matches.append({
+                    "partner_id": row["partner_id"],
+                    "partner_name": partner.get("badge_label", "Partner"),
+                    "trigger": trigger
+                })
+
+        unique = {}
+
+        for match in matches:
+            partner_id = match["partner_id"]
+
+            if (
+                partner_id not in unique
+                or len(match["trigger"]) > len(unique[partner_id]["trigger"])
+            ):
+                unique[partner_id] = match
+
+        return list(unique.values())
+
+    except Exception as e:
+        print("PARTNER TRIGGER MATCH ERROR:", e)
+        return []
+
+
+def answer_from_triggered_partners(
+    message: str,
+    embedding,
+    triggered_partners: list,
+    user_role: str = "guest"
+):
+    """
+    Search only the partners that were triggered by keywords.
+    This reduces hallucination and prevents the wrong partner from answering.
+    """
+    partner_ids = [p["partner_id"] for p in triggered_partners]
+    formatted_answers = []
+
+    # 1. Try Partner QA first
+    if embedding:
+        try:
+            qa_results = supabase_admin.rpc(
+                "match_partner_qa",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.55,
+                    "match_count": 20
+                }
+            ).execute().data or []
+
+            qa_results = [
+                row for row in qa_results
+                if row.get("partner_id") in partner_ids
+            ]
+
+            for row in qa_results:
+                partner_info = next(
+                    p for p in triggered_partners
+                    if p["partner_id"] == row["partner_id"]
+                )
+
+                formatted_answers.append({
+                    "partner_name": partner_info["partner_name"],
+                    "partner_id": row["partner_id"],
+                    "answer": enforce_yes_no(message, row["answer"])
+                })
+
+        except Exception as e:
+            print("TRIGGERED PARTNER QA ERROR:", e)
+
+    if formatted_answers:
+        return {
+            "answers": formatted_answers,
+            "source": "partner_trigger_qa",
+            "badge": "Partners",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    # 2. Try Partner Docs second
+    if embedding:
+        try:
+            doc_results = supabase_admin.rpc(
+                "match_partner_chunks",
+                {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.45,
+                    "match_count": 30
+                }
+            ).execute().data or []
+
+            doc_results = [
+                row for row in doc_results
+                if row.get("partner_id") in partner_ids
+            ]
+
+            grouped = {}
+
+            for row in doc_results:
+                grouped.setdefault(row["partner_id"], []).append(row["content"])
+
+            for partner_id, chunks in grouped.items():
+                partner_info = next(
+                    p for p in triggered_partners
+                    if p["partner_id"] == partner_id
+                )
+
+                cleaned = clean_chunks(chunks)
+                filtered = filter_chunks(cleaned, message)
+
+                raw = filtered[0] if filtered else cleaned[0]
+
+                formatted_answers.append({
+                    "partner_name": partner_info["partner_name"],
+                    "partner_id": partner_id,
+                    "answer": enforce_yes_no(message, raw)
+                })
+
+        except Exception as e:
+            print("TRIGGERED PARTNER DOC ERROR:", e)
+
+    if formatted_answers:
+        return {
+            "answers": formatted_answers,
+            "source": "partner_trigger_docs",
+            "badge": "Partners",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    # 3. Partner was clearly triggered, but no answer found
+    partner_names = ", ".join([p["partner_name"] for p in triggered_partners])
+
+    return {
+        "answer": (
+            f"This looks related to {partner_names}. "
+            "I do not have a precise stored answer for this yet, but you can use Ask a Specialist or Ask an Ambassador for help."
+        ),
+        "source": "partner_trigger_referral",
+        "badge": partner_names,
+        "actions": ["ask_specialist", "ask_ambassador"],
+        "requires_auth": user_role == "guest",
+        "new_title": None
+    }
 
 def detect_system(message: str):
     msg = message.lower()
@@ -603,6 +774,19 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("EMBEDDING ERROR:", e)
         embedding = None
 
+        # =====================================================
+    # 🔥 PARTNER TRIGGER ROUTER
+    # =====================================================
+    triggered_partners = get_partner_trigger_matches(message)
+
+    if triggered_partners:
+        return answer_from_triggered_partners(
+            message=message,
+            embedding=embedding,
+            triggered_partners=triggered_partners,
+            user_role=user_role
+        )
+
     # =====================================================
     # 3️⃣ PARTNER QA (FIRST PRIORITY)
     # =====================================================
@@ -670,7 +854,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             filtered = [remove_redundant_prefixes(c) for c in filtered]
 
             answer = generate_contextual_answer(message, filtered, history)
-            answer = enforce_yes_no(answer, message)
+            answer = enforce_yes_no(message, answer)
 
             return {
                 "answer": answer,
