@@ -505,6 +505,7 @@ Context:
     )
 
     return response.choices[0].message.content.strip()
+
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
 
@@ -546,7 +547,10 @@ def get_partner_trigger_matches(message: str):
 
             pattern = r"\b" + re.escape(trigger_norm) + r"\b"
 
-            if re.search(pattern, msg):
+            msg_compact = msg.replace(" ", "")
+            trigger_compact = trigger_norm.replace(" ", "")
+
+            if re.search(pattern, msg) or trigger_compact in msg_compact:
                 partner = row.get("partners") or {}
 
                 matches.append({
@@ -627,7 +631,12 @@ def answer_from_triggered_partners(
     Search only the partners that were triggered by keywords.
     Then generate a clean answer instead of returning raw chunks.
     """
-    partner_ids = [p["partner_id"] for p in triggered_partners]
+    partner_ids = {
+    str(p["partner_id"])
+    for p in triggered_partners
+    if p.get("partner_id") is not None
+    }
+
     formatted_answers = []
 
     question_lower = message.lower()
@@ -656,7 +665,7 @@ def answer_from_triggered_partners(
 
             qa_results = [
                 row for row in qa_results
-                if row.get("partner_id") in partner_ids
+                if str(row.get("partner_id")) in partner_ids
             ]
 
             grouped_qa = {}
@@ -667,7 +676,7 @@ def answer_from_triggered_partners(
             for partner_id, answers in grouped_qa.items():
                 partner_info = next(
                     p for p in triggered_partners
-                    if p["partner_id"] == partner_id
+                    if str(p["partner_id"]) == str(partner_id)
                 )
 
                 partner_name = partner_info["partner_name"]
@@ -728,7 +737,7 @@ def answer_from_triggered_partners(
 
             doc_results = [
                 row for row in doc_results
-                if row.get("partner_id") in partner_ids
+                if str(row.get("partner_id")) in partner_ids
             ]
 
             grouped_docs = {}
@@ -739,7 +748,7 @@ def answer_from_triggered_partners(
             for partner_id, chunks in grouped_docs.items():
                 partner_info = next(
                     p for p in triggered_partners
-                    if p["partner_id"] == partner_id
+                    if str(p["partner_id"]) == str(partner_id)
                 )
 
                 partner_name = partner_info["partner_name"]
@@ -913,6 +922,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # 🔥 PARTNER TRIGGER ROUTER
     # =====================================================
     triggered_partners = get_partner_trigger_matches(message)
+    print("TRIGGERED PARTNERS DEBUG:", triggered_partners)
 
     if triggered_partners:
         return answer_from_triggered_partners(
