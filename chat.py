@@ -1011,8 +1011,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             }
 
     # =====================================================
-    # 5️⃣ PARTNER DOCS
-    # =====================================================
+# 5️⃣ PARTNER DOCS
+# =====================================================
     if embedding:
         try:
             semantic_results = supabase_admin.rpc(
@@ -1028,48 +1028,54 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             semantic_results = []
 
         if semantic_results:
+            # Sort by similarity if Supabase returns it.
+            semantic_results = sorted(
+                semantic_results,
+                key=lambda r: r.get("similarity", r.get("score", 0)),
+                reverse=True
+            )
 
-            grouped = {}
-            for row in semantic_results:
-                grouped.setdefault(row["partner_id"], []).append(row["content"])
+       
+            best_partner_id = semantic_results[0]["partner_id"]
 
-            formatted_answers = []
+            best_partner_chunks = [
+                row["content"]
+                for row in semantic_results
+                if str(row.get("partner_id")) == str(best_partner_id)
+            ]
 
-            for partner_id, chunks in grouped.items():
-                try:
-                    partner = supabase_admin.table("partners") \
-                        .select("badge_label") \
-                        .eq("id", partner_id) \
-                        .single() \
-                        .execute()
+            try:
+                partner = supabase_admin.table("partners") \
+                    .select("badge_label") \
+                    .eq("id", best_partner_id) \
+                    .single() \
+                    .execute()
 
-                    partner_name = partner.data["badge_label"] if partner.data else "Partner"
-                except Exception as e:
-                    print("PARTNER FETCH ERROR:", e)
-                    partner_name = "Partner"
+                partner_name = partner.data["badge_label"] if partner.data else "Partner"
+            except Exception as e:
+                print("PARTNER FETCH ERROR:", e)
+                partner_name = "Partner"
 
-                cleaned = clean_chunks(chunks)
-                filtered = filter_chunks(cleaned, message)
+            cleaned = clean_chunks(best_partner_chunks)
+            filtered = filter_chunks(cleaned, message)
 
-                raw = filtered[0] if filtered else chunks[0]
-                answer = enforce_yes_no(message, raw)
+            raw = filtered[0] if filtered else best_partner_chunks[0]
+            answer = enforce_yes_no(message, raw)
 
-                formatted_answers.append({
-                    "partner_name": partner_name,
-                    "partner_id": partner_id,
-                    "answer": answer
-                })
-
-            if formatted_answers:
-                return {
-                    "answers": formatted_answers,
-                    "source": "partner_docs_raw",
-                    "badge": "Partners",
-                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                    "requires_auth": False,
-                    "new_title": None
-                }
-
+            return {
+                "answers": [
+                    {
+                        "partner_name": partner_name,
+                        "partner_id": best_partner_id,
+                        "answer": answer
+                    }
+                ],
+                "source": "partner_docs_raw",
+                "badge": "Partners",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
     # =====================================================
     # 6️⃣ THEBRIDGE DOCS
     # =====================================================
