@@ -657,6 +657,93 @@ Partner context:
 
     return response.choices[0].message.content.strip()
 
+def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
+    """
+    For explicitly detected partners, search ONLY their partner_chunks rows
+    and choose the chunk whose text best matches the user's question.
+
+    Returns the exact stored chunk unchanged.
+    No OpenAI rewrite. No hard-coded partner/topic.
+    """
+    try:
+        allowed_partner_ids = [
+            str(p["partner_id"])
+            for p in triggered_partners
+            if p.get("partner_id") is not None
+        ]
+
+        if not allowed_partner_ids:
+            return None
+
+        resp = supabase_admin.table("partner_chunks") \
+            .select("partner_id, content") \
+            .in_("partner_id", allowed_partner_ids) \
+            .execute()
+
+        rows = resp.data or []
+
+        if not rows:
+            return None
+
+        stop_words = {
+            "what", "why", "how", "when", "where", "which", "who",
+            "do", "does", "did", "is", "are", "was", "were",
+            "the", "a", "an", "and", "or", "but", "with", "from",
+            "for", "to", "of", "in", "on", "at", "by", "about",
+            "my", "your", "our", "their", "this", "that", "it",
+            "i", "me", "we", "you"
+        }
+
+        q_norm = normalize(message)
+
+        q_words = [
+            w for w in q_norm.split()
+            if len(w) > 2 and w not in stop_words
+        ]
+
+        if not q_words:
+            return None
+
+        scored = []
+
+        for row in rows:
+            content = row.get("content") or ""
+            content_norm = normalize(content)
+
+            score = 0
+
+            # Word overlap
+            for word in q_words:
+                if word in content_norm:
+                    score += 3
+
+            # Phrase overlap: much stronger than single words
+            for i in range(len(q_words) - 1):
+                phrase = f"{q_words[i]} {q_words[i + 1]}"
+                if phrase in content_norm:
+                    score += 10
+
+            # Three-word phrase overlap: strongest generic signal
+            for i in range(len(q_words) - 2):
+                phrase = f"{q_words[i]} {q_words[i + 1]} {q_words[i + 2]}"
+                if phrase in content_norm:
+                    score += 20
+
+            scored.append((score, row))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        best_score, best_row = scored[0]
+
+        if best_score <= 0:
+            return None
+
+        return best_row
+
+    except Exception as e:
+        print("BEST TRIGGERED PARTNER CHUNK ERROR:", e)
+        return None
+
 
 def answer_from_triggered_partners(
     message: str,
@@ -669,15 +756,40 @@ def answer_from_triggered_partners(
     Then generate a clean answer instead of returning raw chunks.
     """
     partner_ids = {
-    str(p["partner_id"])
-    for p in triggered_partners
-    if p.get("partner_id") is not None
+        str(p["partner_id"])
+        for p in triggered_partners
+        if p.get("partner_id") is not None
     }
 
     formatted_answers = []
 
-    question_lower = message.lower()
+# =====================================================
+# 0. Best exact partner chunk first
+# =====================================================
+    best_chunk = get_best_triggered_partner_chunk(message, triggered_partners)
 
+    if best_chunk:
+        partner_info = next(
+            p for p in triggered_partners
+            if str(p["partner_id"]) == str(best_chunk["partner_id"])
+        )
+
+        return {
+            "answers": [
+                {
+                    "partner_name": partner_info["partner_name"],
+                    "partner_id": best_chunk["partner_id"],
+                    "answer": best_chunk["content"]
+                }
+            ],
+            "source": "partner_trigger_chunk_exact",
+            "badge": "Partners",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+    question_lower = message.lower()
     referral_intent_words = [
         "where", "buy", "purchase", "supplier", "contact",
         "who should", "who can", "recommend", "provider",
