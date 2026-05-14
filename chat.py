@@ -784,6 +784,9 @@ def choose_best_chunk_with_ai(message: str, chunks: list):
                             "Do not rewrite anything.\n\n"
                             "Rules:\n"
                             "- Choose the chunk that directly answers the user's exact question.\n"
+                            "- Do not choose a chunk only because it shares one keyword with the question.\n"
+                            "- If the user asks what something means, choose an explanatory/definition chunk.\n"
+                            "- If the user mentions a need, object, system, product, or equipment, prioritize chunks about that thing, not the person/company who requested it.\n"
                             "- For 'who is' or 'what is' questions, prefer overview/definition chunks.\n"
                             "- Do not choose a narrow capability, technical, pricing, insurance, network, troubleshooting, or safety chunk unless the user specifically asked about that topic.\n"
                             "- If none of the chunks directly answer the question, return null.\n\n"
@@ -1063,19 +1066,7 @@ def answer_from_triggered_partners(
     # =====================================================
     # 3. Partner was clearly triggered, but no answer found
     # =====================================================
-    partner_names = ", ".join([p["partner_name"] for p in triggered_partners])
-
-    return {
-        "answer": (
-            f"This looks related to {partner_names}. "
-            "I do not have a precise stored answer for this yet, but you can use Ask a Specialist or Ask an Ambassador for help."
-        ),
-        "source": "partner_trigger_referral",
-        "badge": partner_names,
-        "actions": ["ask_specialist", "ask_ambassador"],
-        "requires_auth": user_role == "guest",
-        "new_title": None
-    }
+    return None
 
 def detect_system(message: str):
     msg = message.lower()
@@ -1177,24 +1168,41 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("EMBEDDING ERROR:", e)
         embedding = None
 
-# =====================================================
-# 🔥 PARTNER NAME / TRIGGER ROUTER
-# =====================================================
-    triggered_partners = get_partner_name_match(message)
+    # =====================================================
+    # 🔥 PARTNER NAME / TRIGGER ROUTER
+    # =====================================================
 
+    # Exact partner name match is strong.
+    partner_name_matches = get_partner_name_match(message)
 
-    if not triggered_partners:
-        triggered_partners = get_partner_trigger_matches(message)
+    if partner_name_matches:
+        result = answer_from_triggered_partners(
+            message=message,
+            embedding=embedding,
+            triggered_partners=partner_name_matches,
+            user_role=user_role
+        )
 
+        if result:
+            return result
+
+    # Trigger words are weaker than partner names.
+    # They should help retrieval, but must not force a wrong partner.
+    triggered_partners = get_partner_trigger_matches(message)
+
+    print("PARTNER NAME MATCHES DEBUG:", partner_name_matches)
     print("TRIGGERED PARTNERS DEBUG:", triggered_partners)
 
     if triggered_partners:
-        return answer_from_triggered_partners(
+        result = answer_from_triggered_partners(
             message=message,
             embedding=embedding,
             triggered_partners=triggered_partners,
             user_role=user_role
         )
+
+        if result:
+            return result
     # =====================================================
     # 3️⃣ PARTNER QA (FIRST PRIORITY)
     # =====================================================
@@ -1287,8 +1295,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_chunks",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.35,
-                    "match_count": 30
+                    "match_threshold": 0.30,
+                    "match_count": 40
                 }
             ).execute().data
         except Exception as e:
