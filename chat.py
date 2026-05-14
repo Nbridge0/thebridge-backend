@@ -213,7 +213,29 @@ def send_email(to_emails, subject, body):
         print("❌ BREVO API ERROR:", response.status_code, response.text)
         raise Exception("Email send failed")
 
+def keep_only_triggered_partner_answers(answers: list, triggered_partners: list):
+    allowed_partner_ids = {
+        str(p["partner_id"]) for p in triggered_partners
+        if p.get("partner_id") is not None
+    }
 
+    cleaned = []
+    seen = set()
+
+    for ans in answers:
+        partner_id = str(ans.get("partner_id"))
+
+        if partner_id not in allowed_partner_ids:
+            continue
+
+        if partner_id in seen:
+            continue
+
+        seen.add(partner_id)
+        cleaned.append(ans)
+
+    return cleaned
+    
 # -------------------------------
 # OPENAI
 # -------------------------------
@@ -675,6 +697,11 @@ def answer_from_triggered_partners(
         except Exception as e:
             print("TRIGGERED PARTNER QA ERROR:", e)
 
+    formatted_answers = keep_only_triggered_partner_answers(
+        formatted_answers,
+        triggered_partners
+    )
+
     if formatted_answers:
         return {
             "answers": formatted_answers,
@@ -749,6 +776,11 @@ def answer_from_triggered_partners(
 
         except Exception as e:
             print("TRIGGERED PARTNER DOC ERROR:", e)
+
+    formatted_answers = keep_only_triggered_partner_answers(
+        formatted_answers,
+        triggered_partners
+    )
 
     if formatted_answers:
         return {
