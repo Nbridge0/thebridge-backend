@@ -747,72 +747,131 @@ def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
 
 def choose_best_chunk_with_ai(message: str, chunks: list):
     """
-    Uses AI only as a selector/reranker.
+    Uses AI only to select the best database chunk.
     It does NOT generate or rewrite the answer.
-    It returns the best matching chunk object from the database.
+    It checks all chunks in batches, then does a final selection.
     """
 
     if not chunks:
         return None
 
-    # Keep prompt small
-    candidates = []
+    def extract_json(raw: str):
+        raw = raw.strip()
 
-    for i, chunk in enumerate(chunks[:25]):
-        content = chunk.get("content") or ""
-        candidates.append({
-            "index": i,
-            "content": content[:1200]
-        })
+        # Handles ```json ... ``` if the model ever returns it
+        raw = raw.replace("```json", "").replace("```", "").strip()
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a retrieval reranker.\n"
-                        "Your only job is to choose which database chunk best answers the user's question.\n"
-                        "Do not answer the question.\n"
-                        "Do not rewrite anything.\n"
-                        "Return JSON only in this exact format:\n"
-                        "{\"index\": 0}\n\n"
-                        "If none of the chunks answer the question, return:\n"
-                        "{\"index\": null}"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps({
-                        "question": message,
-                        "chunks": candidates
-                    })
-                }
-            ],
-            temperature=0
-        )
-
-        raw = response.choices[0].message.content.strip()
-        data = json.loads(raw)
-
-        index = data.get("index")
-
-        if index is None:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
             return None
 
-        if not isinstance(index, int):
+        try:
+            return json.loads(match.group(0))
+        except Exception:
             return None
 
-        if index < 0 or index >= len(chunks[:25]):
+    def pick_from_candidates(candidates: list):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a strict retrieval reranker.\n"
+                            "Your only job is to choose which database chunk best answers the user's question.\n"
+                            "Do not answer the question.\n"
+                            "Do not rewrite anything.\n\n"
+                            "Rules:\n"
+                            "- Choose the chunk that directly answers the user's exact question.\n"
+                            "- For 'who is' or 'what is' questions, prefer overview/definition chunks.\n"
+                            "- Do not choose a narrow capability, technical, pricing, insurance, network, troubleshooting, or safety chunk unless the user specifically asked about that topic.\n"
+                            "- If none of the chunks directly answer the question, return null.\n\n"
+                            "Return JSON only:\n"
+                            "{\"index\": 0}\n"
+                            "or\n"
+                            "{\"index\": null}"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "question": message,
+                            "chunks": candidates
+                        })
+                    }
+                ],
+                temperature=0
+            )
+
+            raw = response.choices[0].message.content.strip()
+            data = extract_json(raw)
+
+            if not data:
+                return None
+
+            index = data.get("index")
+
+            if index is None:
+                return None
+
+            if not isinstance(index, int):
+                return None
+
+            if index < 0 or index >= len(candidates):
+                return None
+
+            return candidates[index]
+
+        except Exception as e:
+            print("CHUNK RERANK PICK ERROR:", e)
             return None
 
-        return chunks[index]
+    # First pass: check ALL chunks in batches
+    batch_size = 20
+    winners = []
 
-    except Exception as e:
-        print("CHUNK RERANK ERROR:", e)
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start:start + batch_size]
+
+        candidates = []
+
+        for local_index, chunk in enumerate(batch):
+            candidates.append({
+                "index": local_index,
+                "global_index": start + local_index,
+                "content": (chunk.get("content") or "")[:1500]
+            })
+
+        picked = pick_from_candidates(candidates)
+
+        if picked is not None:
+            winners.append(picked)
+
+    if not winners:
         return None
 
+    # Second pass: choose best winner from all batch winners
+    final_candidates = []
+
+    for i, winner in enumerate(winners):
+        final_candidates.append({
+            "index": i,
+            "global_index": winner["global_index"],
+            "content": winner["content"]
+        })
+
+    final_pick = pick_from_candidates(final_candidates)
+
+    if final_pick is None:
+        return None
+
+    global_index = final_pick["global_index"]
+
+    if global_index < 0 or global_index >= len(chunks):
+        return None
+
+    return chunks[global_index]
 
 def answer_from_triggered_partners(
     message: str,
@@ -837,7 +896,7 @@ def answer_from_triggered_partners(
 # =====================================================
     try:
         partner_chunks_resp = supabase_admin.table("partner_chunks") \
-            .select("partner_id, content") \
+            .select("id, partner_id, content") \
             .in_("partner_id", list(partner_ids)) \
             .execute()
 
@@ -1228,8 +1287,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_chunks",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.58,
-                    "match_count": 8
+                    "match_threshold": 0.35,
+                    "match_count": 30
                 }
             ).execute().data
         except Exception as e:
