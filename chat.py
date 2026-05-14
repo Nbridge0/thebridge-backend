@@ -718,28 +718,14 @@ def answer_from_triggered_partners(
 
                 partner_name = partner_info["partner_name"]
 
-                # If the user is asking where/who/buy/contact,
-                # do not return a random product/application answer.
-                if has_referral_intent:
-                    clean_answer = (
-                        f"For this, you should refer to {partner_name}. "
-                        f"They are the relevant TheBridge partner for this topic."
-                    )
-                else:
-                    context = "\n\n".join(answers[:3])
 
-                    clean_answer = generate_partner_answer(
-                        question=message,
-                        partner_name=partner_name,
-                        context=context
-                    )
+                exact_answer = answers[0]
 
                 formatted_answers.append({
                     "partner_name": partner_name,
                     "partner_id": partner_id,
-                    "answer": enforce_yes_no(message, clean_answer)
+                    "answer": exact_answer
                 })
-
         except Exception as e:
             print("TRIGGERED PARTNER QA ERROR:", e)
 
@@ -798,26 +784,12 @@ def answer_from_triggered_partners(
                 if not selected_chunks:
                     continue
 
-                # If the user is asking where/who/buy/contact,
-                # make it a referral instead of returning a random document chunk.
-                if has_referral_intent:
-                    clean_answer = (
-                        f"For this, you should refer to {partner_name}. "
-                        f"They are the relevant TheBridge partner for this topic."
-                    )
-                else:
-                    context = "\n\n".join(selected_chunks)
-
-                    clean_answer = generate_partner_answer(
-                        question=message,
-                        partner_name=partner_name,
-                        context=context
-                    )
+                exact_answer = selected_chunks[0]
 
                 formatted_answers.append({
                     "partner_name": partner_name,
                     "partner_id": partner_id,
-                    "answer": enforce_yes_no(message, clean_answer)
+                    "answer": exact_answer
                 })
 
         except Exception as e:
