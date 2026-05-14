@@ -1236,44 +1236,44 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             print("PARTNER DOC ERROR:", e)
             semantic_results = []
 
-            if semantic_results:
-                semantic_results = sorted(
-                    semantic_results,
-                    key=lambda r: r.get("similarity", r.get("score", 0)),
-                    reverse=True
-                )
+        if semantic_results:
+            semantic_results = sorted(
+                semantic_results,
+                key=lambda r: r.get("similarity", r.get("score", 0)),
+                reverse=True
+            )
 
-                best_chunk = choose_best_chunk_with_ai(message, semantic_results)
+            best_chunk = choose_best_chunk_with_ai(message, semantic_results)
 
-                if best_chunk:
-                    best_partner_id = best_chunk["partner_id"]
+            if best_chunk:
+                best_partner_id = best_chunk["partner_id"]
 
-                    try:
-                        partner = supabase_admin.table("partners") \
-                            .select("badge_label") \
-                            .eq("id", best_partner_id) \
-                            .single() \
-                            .execute()
+                try:
+                    partner = supabase_admin.table("partners") \
+                        .select("badge_label") \
+                        .eq("id", best_partner_id) \
+                        .single() \
+                        .execute()
 
-                        partner_name = partner.data["badge_label"] if partner.data else "Partner"
-                    except Exception as e:
-                        print("PARTNER FETCH ERROR:", e)
-                        partner_name = "Partner"
+                    partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                except Exception as e:
+                    print("PARTNER FETCH ERROR:", e)
+                    partner_name = "Partner"
 
-                   return {
-                        "answers": [
-                            {
-                                "partner_name": partner_name,
-                                "partner_id": best_partner_id,
-                                "answer": best_chunk["content"]
-                            }
-                         ],
-                         "source": "partner_docs_reranked",
-                         "badge": "Partners",
-                         "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                         "requires_auth": False,
-                         "new_title": None
-                    }
+                return {
+                    "answers": [
+                        {
+                            "partner_name": partner_name,
+                            "partner_id": best_partner_id,
+                            "answer": best_chunk["content"]
+                        }
+                    ],
+                    "source": "partner_docs_reranked",
+                    "badge": "Partners",
+                    "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                    "requires_auth": False,
+                    "new_title": None
+                }
     # =====================================================
     # 6️⃣ THEBRIDGE DOCS
     # =====================================================
