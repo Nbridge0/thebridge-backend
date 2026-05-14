@@ -576,6 +576,43 @@ def get_partner_trigger_matches(message: str):
         print("PARTNER TRIGGER MATCH ERROR:", e)
         return []
 
+def get_partner_name_match(message: str):
+    """
+    Detects if the user explicitly mentioned a partner name.
+    This prevents semantic search from switching to another partner
+    just because the question contains words like insurance, sonar, safety, etc.
+    """
+    try:
+        msg = normalize(message)
+        msg_compact = msg.replace(" ", "")
+
+        resp = supabase_admin.table("partners") \
+            .select("id, badge_label") \
+            .execute()
+
+        matches = []
+
+        for partner in resp.data or []:
+            partner_name = partner.get("badge_label") or ""
+            partner_norm = normalize(partner_name)
+            partner_compact = partner_norm.replace(" ", "")
+
+            if not partner_norm:
+                continue
+
+            if partner_norm in msg or partner_compact in msg_compact:
+                matches.append({
+                    "partner_id": partner["id"],
+                    "partner_name": partner_name,
+                    "trigger": partner_name
+                })
+
+        return matches
+
+    except Exception as e:
+        print("PARTNER NAME MATCH ERROR:", e)
+        return []
+
 def generate_partner_answer(question: str, partner_name: str, context: str) -> str:
     """
     Generates a clean user-facing answer from partner context.
@@ -918,10 +955,15 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         print("EMBEDDING ERROR:", e)
         embedding = None
 
-        # =====================================================
-    # 🔥 PARTNER TRIGGER ROUTER
-    # =====================================================
-    triggered_partners = get_partner_trigger_matches(message)
+# =====================================================
+# 🔥 PARTNER NAME / TRIGGER ROUTER
+# =====================================================
+    triggered_partners = get_partner_name_match(message)
+
+
+    if not triggered_partners:
+        triggered_partners = get_partner_trigger_matches(message)
+
     print("TRIGGERED PARTNERS DEBUG:", triggered_partners)
 
     if triggered_partners:
@@ -931,7 +973,6 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             triggered_partners=triggered_partners,
             user_role=user_role
         )
-
     # =====================================================
     # 3️⃣ PARTNER QA (FIRST PRIORITY)
     # =====================================================
