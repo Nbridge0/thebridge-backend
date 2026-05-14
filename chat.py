@@ -695,7 +695,7 @@ def answer_from_triggered_partners(
                 "match_partner_qa",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.55,
+                    "match_threshold": 0.45,
                     "match_count": 20
                 }
             ).execute().data or []
@@ -954,8 +954,8 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "match_partner_qa",
                 {
                     "query_embedding": embedding,
-                    "match_threshold": 0.70,  # slightly lower for better trigger
-                    "match_count": 1
+                    "match_threshold": 0.45,  # slightly lower for better trigger
+                    "match_count": 5
                 }
             ).execute().data
         except Exception as e:
@@ -963,8 +963,13 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             qa_results = []
 
         if qa_results:
-            row = qa_results[0]
+            qa_results = sorted(
+                qa_results,
+                key=lambda r: r.get("similarity", r.get("score", 0)),
+                reverse=True
+            )
 
+            row = qa_results[0]
             try:
                 partner = supabase_admin.table("partners") \
                     .select("badge_label") \
