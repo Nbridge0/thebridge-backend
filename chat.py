@@ -5,6 +5,7 @@ import secrets
 import requests
 import openai
 import re
+import json
 from supabase import create_client, Client
 from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
@@ -744,6 +745,74 @@ def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
         print("BEST TRIGGERED PARTNER CHUNK ERROR:", e)
         return None
 
+def choose_best_chunk_with_ai(message: str, chunks: list):
+    """
+    Uses AI only as a selector/reranker.
+    It does NOT generate or rewrite the answer.
+    It returns the best matching chunk object from the database.
+    """
+
+    if not chunks:
+        return None
+
+    # Keep prompt small
+    candidates = []
+
+    for i, chunk in enumerate(chunks[:25]):
+        content = chunk.get("content") or ""
+        candidates.append({
+            "index": i,
+            "content": content[:1200]
+        })
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a retrieval reranker.\n"
+                        "Your only job is to choose which database chunk best answers the user's question.\n"
+                        "Do not answer the question.\n"
+                        "Do not rewrite anything.\n"
+                        "Return JSON only in this exact format:\n"
+                        "{\"index\": 0}\n\n"
+                        "If none of the chunks answer the question, return:\n"
+                        "{\"index\": null}"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": message,
+                        "chunks": candidates
+                    })
+                }
+            ],
+            temperature=0
+        )
+
+        raw = response.choices[0].message.content.strip()
+        data = json.loads(raw)
+
+        index = data.get("index")
+
+        if index is None:
+            return None
+
+        if not isinstance(index, int):
+            return None
+
+        if index < 0 or index >= len(chunks[:25]):
+            return None
+
+        return chunks[index]
+
+    except Exception as e:
+        print("CHUNK RERANK ERROR:", e)
+        return None
+
 
 def answer_from_triggered_partners(
     message: str,
@@ -764,31 +833,41 @@ def answer_from_triggered_partners(
     formatted_answers = []
 
 # =====================================================
-# 0. Best exact partner chunk first
+# 0. Best partner chunk by AI reranking
 # =====================================================
-    best_chunk = get_best_triggered_partner_chunk(message, triggered_partners)
+    try:
+        partner_chunks_resp = supabase_admin.table("partner_chunks") \
+            .select("partner_id, content") \
+            .in_("partner_id", list(partner_ids)) \
+            .execute()
 
-    if best_chunk:
-        partner_info = next(
-            p for p in triggered_partners
-            if str(p["partner_id"]) == str(best_chunk["partner_id"])
-        )
+        partner_chunks = partner_chunks_resp.data or []
 
-        return {
-            "answers": [
-                {
-                    "partner_name": partner_info["partner_name"],
-                    "partner_id": best_chunk["partner_id"],
-                    "answer": best_chunk["content"]
-                }
-            ],
-            "source": "partner_trigger_chunk_exact",
-            "badge": "Partners",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-            "new_title": None
-        }
+        best_chunk = choose_best_chunk_with_ai(message, partner_chunks)
 
+        if best_chunk:
+            partner_info = next(
+                p for p in triggered_partners
+                if str(p["partner_id"]) == str(best_chunk["partner_id"])
+            )
+
+            return {
+                "answers": [
+                    {
+                        "partner_name": partner_info["partner_name"],
+                        "partner_id": best_chunk["partner_id"],
+                        "answer": best_chunk["content"]
+                    }
+                ],
+                "source": "partner_trigger_chunk_reranked",
+                "badge": "Partners",
+                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                "requires_auth": False,
+                "new_title": None
+            }
+
+    except Exception as e:
+        print("TRIGGERED PARTNER CHUNK RERANK ERROR:", e)
     question_lower = message.lower()
     referral_intent_words = [
         "where", "buy", "purchase", "supplier", "contact",
@@ -1158,54 +1237,43 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             semantic_results = []
 
         if semantic_results:
-            # Sort by similarity if Supabase returns it.
             semantic_results = sorted(
                 semantic_results,
                 key=lambda r: r.get("similarity", r.get("score", 0)),
                 reverse=True
             )
 
-       
-            best_partner_id = semantic_results[0]["partner_id"]
+            best_chunk = choose_best_chunk_with_ai(message, semantic_results)
 
-            best_partner_chunks = [
-                row["content"]
-                for row in semantic_results
-                if str(row.get("partner_id")) == str(best_partner_id)
-            ]
+            if best_chunk:
+                best_partner_id = best_chunk["partner_id"]
 
-            try:
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", best_partner_id) \
-                    .single() \
-                    .execute()
+                try:
+                    partner = supabase_admin.table("partners") \
+                        .select("badge_label") \
+                        .eq("id", best_partner_id) \
+                        .single() \
+                        .execute()
 
-                partner_name = partner.data["badge_label"] if partner.data else "Partner"
-            except Exception as e:
-                print("PARTNER FETCH ERROR:", e)
-                partner_name = "Partner"
+                    partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                except Exception as e:
+                    print("PARTNER FETCH ERROR:", e)
+                    partner_name = "Partner"
 
-            cleaned = clean_chunks(best_partner_chunks)
-            filtered = filter_chunks(cleaned, message)
-
-            raw = filtered[0] if filtered else best_partner_chunks[0]
-            answer = enforce_yes_no(message, raw)
-
-            return {
-                "answers": [
-                    {
-                        "partner_name": partner_name,
-                        "partner_id": best_partner_id,
-                        "answer": answer
-                    }
-                ],
-                "source": "partner_docs_raw",
-                "badge": "Partners",
-                "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-                "requires_auth": False,
-                "new_title": None
-            }
+               return {
+                    "answers": [
+                        {
+                            "partner_name": partner_name,
+                            "partner_id": best_partner_id,
+                            "answer": best_chunk["content"]
+                        }
+                    ],
+                     "source": "partner_docs_reranked",
+                     "badge": "Partners",
+                     "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+                     "requires_auth": False,
+                     "new_title": None
+                }
     # =====================================================
     # 6️⃣ THEBRIDGE DOCS
     # =====================================================
