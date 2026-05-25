@@ -59,32 +59,21 @@ def get_user_by_email(email: str):
 
     return None
 
-def get_profile_by_email(email: str):
+
+def profile_exists(email: str) -> bool:
     email = email.lower().strip()
 
     try:
         resp = supabase_admin.table("user_profiles") \
-            .select("id, email, name") \
+            .select("id") \
             .eq("email", email) \
-            .maybe_single() \
+            .limit(1) \
             .execute()
 
-        return resp.data
-    except Exception:
-        return None
-
-
-def delete_auth_user_if_exists(email: str):
-    """
-    Deletes the Supabase Auth user if it exists.
-    This is needed when user_profiles was manually deleted,
-    but the Auth user still exists.
-    """
-    email = email.lower().strip()
-    user = get_user_by_email(email)
-
-    if user:
-        supabase_admin.auth.admin.delete_user(user.id)
+        return bool(resp.data)
+    except Exception as e:
+        print("PROFILE CHECK ERROR:", e)
+        return False
 
 
 VERIFICATION_EMAIL_SUBJECT = "Almost There! Verify Your TheBridge Account"
@@ -499,27 +488,6 @@ def chat_ask_ai(req: dict):
 @app.post("/auth/signup")
 def signup(req: SignupRequest):
     email = req.email.lower().strip()
-    existing_profile = get_profile_by_email(email)
-    existing_auth_user = get_user_by_email(email)
-
-    # If Auth user exists but profile was deleted,
-    # clean up the orphan Auth user so signup can start fresh.
-    if existing_auth_user and not existing_profile:
-        try:
-            supabase_admin.auth.admin.delete_user(existing_auth_user.id)
-        except Exception as e:
-            print("AUTH ORPHAN CLEANUP ERROR:", e)
-            raise HTTPException(
-                status_code=500,
-                detail="Could not reset old account. Please contact support."
-            )
-
-    # If both profile and auth user exist, this is already registered.
-    if existing_auth_user and existing_profile:
-        raise HTTPException(
-            status_code=400,
-            detail="Email already registered. Please log in."
-        )
     code = secrets.token_hex(3)
     expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
 
@@ -542,7 +510,6 @@ def signup(req: SignupRequest):
     )
 
     return {"status": "verification_sent"}
-
 
 @app.post("/auth/verify")
 def verify(req: VerifyRequest):
@@ -600,34 +567,18 @@ def verify(req: VerifyRequest):
 def login(req: LoginRequest):
     email = req.email.lower().strip()
 
-    # 1. Your database profile is the source of truth.
-    profile = get_profile_by_email(email)
-
-    if not profile:
-        # 2. If profile was deleted but Auth user still exists,
-        # remove the Auth user too so the account is fully gone.
-        try:
-            delete_auth_user_if_exists(email)
-        except Exception as e:
-            print("AUTH CLEANUP ERROR:", e)
-
+    if not profile_exists(email):
         raise HTTPException(
             status_code=401,
-            detail="Account not found. Please create a new account."
+            detail="Account not found. Please create an account again."
         )
 
-    # 3. Only allow login if profile still exists.
     try:
         auth = supabase.auth.sign_in_with_password({
             "email": email,
             "password": req.password
         })
-
-        return {
-            "status": "ok",
-            "user": auth.user
-        }
-
+        return {"status": "ok", "user": auth.user}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
