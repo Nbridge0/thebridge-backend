@@ -488,80 +488,177 @@ def chat_ask_ai(req: dict):
 @app.post("/auth/signup")
 def signup(req: SignupRequest):
     email = req.email.lower().strip()
-    code = secrets.token_hex(3)
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
 
-    supabase_admin.table("email_verifications").upsert({
-        "email": email,
-        "name": req.name,
-        "password": req.password,
-        "newsletter": req.newsletter,
-        "code": code,
-        "expires_at": expiry.isoformat()
-    }).execute()
+    try:
+        existing_user = get_user_by_email(email)
 
-    send_email(
-        email,
-        VERIFICATION_EMAIL_SUBJECT,
-        VERIFICATION_EMAIL_BODY.format(
-            name=req.name,
-            code=code
+        if existing_user or profile_exists(email):
+            raise HTTPException(
+                status_code=409,
+                detail="Account already exists. Please log in instead."
+            )
+
+        code = secrets.token_hex(3)
+        expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+        upsert_resp = (
+            supabase_admin
+            .table("email_verifications")
+            .upsert({
+                "email": email,
+                "name": req.name,
+                "password": req.password,
+                "newsletter": req.newsletter,
+                "code": code,
+                "expires_at": expiry.isoformat()
+            })
+            .execute()
         )
-    )
 
-    return {"status": "verification_sent"}
+        if not upsert_resp.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to save verification code"
+            )
 
+        send_email(
+            email,
+            VERIFICATION_EMAIL_SUBJECT,
+            VERIFICATION_EMAIL_BODY.format(
+                name=req.name,
+                code=code
+            )
+        )
+
+        return {"status": "verification_sent"}
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("SIGNUP ERROR:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Signup failed"
+        )
 @app.post("/auth/verify")
 def verify(req: VerifyRequest):
     email = req.email.lower().strip()
     code = req.code.strip()
 
-    resp = supabase_admin.table("email_verifications") \
-        .select("*") \
-        .eq("email", email) \
-        .execute()
+    try:
+        # 1. Fetch verification record
+        resp = (
+            supabase_admin
+            .table("email_verifications")
+            .select("*")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+        )
 
-    if not resp.data:
-        raise HTTPException(400, "No verification request found")
+        if not resp.data:
+            raise HTTPException(
+                status_code=400,
+                detail="No verification request found"
+            )
 
-    record = resp.data[0]
+        record = resp.data[0]
 
-    if datetime.fromisoformat(record["expires_at"]) < datetime.now(timezone.utc):
-        raise HTTPException(400, "Verification code expired")
+        # 2. Check expiry safely
+        expires_at = datetime.fromisoformat(
+            record["expires_at"].replace("Z", "+00:00")
+        )
 
-    if code != record["code"]:
-        raise HTTPException(400, "Invalid verification code")
+        if expires_at < datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=400,
+                detail="Verification code expired"
+            )
 
-    # delete verification record
-    supabase_admin.table("email_verifications") \
-        .delete() \
-        .eq("email", email) \
-        .execute()
+        # 3. Check code
+        if code != str(record["code"]).strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid verification code"
+            )
 
-    # ✅ CREATE USER (Confirm email is OFF in Supabase)
-    auth = supabase.auth.sign_up({
-        "email": email,
-        "password": record["password"]
-    })
+        # 4. Check if auth user already exists
+        existing_user = get_user_by_email(email)
 
-    user_id = auth.user.id
+        if existing_user:
+            user_id = existing_user.id
+        else:
+            # 5. Create user with ADMIN client
+            created_user = supabase_admin.auth.admin.create_user({
+                "email": email,
+                "password": record["password"],
+                "email_confirm": True,
+                "user_metadata": {
+                    "name": record["name"]
+                }
+            })
 
-    # profile
-    supabase_admin.table("user_profiles").upsert({
-        "id": user_id,
-        "email": email,
-        "name": record["name"],
-        "newsletter": record.get("newsletter", False)
-    }).execute()
+            if not created_user or not created_user.user:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create user account"
+                )
 
-    send_email(
-        email,
-        WELCOME_EMAIL_SUBJECT,
-        WELCOME_EMAIL_BODY.format(name=record["name"])
-    )
+            user_id = created_user.user.id
 
-    return {"status": "verified"}
+        # 6. Create/update profile
+        profile_resp = (
+            supabase_admin
+            .table("user_profiles")
+            .upsert({
+                "id": user_id,
+                "email": email,
+                "name": record["name"],
+                "newsletter": record.get("newsletter", False)
+            })
+            .execute()
+        )
 
+        if not profile_resp.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create user profile"
+            )
+
+        # 7. Delete verification record ONLY after success
+        (
+            supabase_admin
+            .table("email_verifications")
+            .delete()
+            .eq("email", email)
+            .execute()
+        )
+
+        # 8. Send welcome email, but don't fail verification if email fails
+        try:
+            send_email(
+                email,
+                WELCOME_EMAIL_SUBJECT,
+                WELCOME_EMAIL_BODY.format(name=record["name"])
+            )
+        except Exception as e:
+            print("WELCOME EMAIL ERROR:", e)
+
+        return {
+            "status": "verified",
+            "user_id": user_id
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("VERIFY ERROR:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Server error during verification"
+        )
 
 @app.post("/auth/login")
 def login(req: LoginRequest):
