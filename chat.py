@@ -712,10 +712,10 @@ Partner context:
 
 def generate_adaptive_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
     """
-    Uses the retrieved partner chunk correctly:
-    - For narrow factual questions, extracts only the relevant sentence(s).
-    - For broad/explanatory questions, allows a fuller answer from the chunk.
-    - Never invents outside the provided context.
+    Smart answer generator:
+    - Short for narrow factual questions.
+    - Fuller for broad/explanatory questions.
+    - Uses only retrieved partner context.
     """
     if not context_chunks:
         return NO_ANSWER_FALLBACK
@@ -730,25 +730,34 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "Answer using ONLY the provided partner context.\n"
                 "Do not invent details.\n"
                 "Do not mention that you are using context.\n"
-                "Do not expose database/chunk wording unless it is actually the best answer.\n\n"
+                "Do not mention database chunks.\n\n"
 
-                "IMPORTANT ANSWER LENGTH RULE:\n"
-                "- If the user's question asks for one specific fact, return only the sentence or short part of the context that answers it.\n"
-                "- If the answer is clearly contained in one line of the context, use only that line and do not include the rest of the chunk.\n"
-                "- If the user's question is broad, explanatory, asks 'what is', 'explain', 'overview', 'what are', 'list', 'causes', 'risks', 'benefits', 'steps', 'procedure', or asks for multiple items, then include the full relevant information from the chunk.\n"
-                "- If the whole chunk is needed to answer properly, use the whole relevant chunk content, cleaned only for readability.\n"
-                "- Do not make every answer short.\n"
-                "- Do not make every answer long.\n"
-                "- Match the answer length to the question.\n\n"
+                "CRITICAL ANSWER LENGTH RULES:\n"
+                "1. If the user asks a narrow factual question, answer briefly.\n"
+                "   Examples of narrow questions: where is it headquartered, is it developed in the Netherlands, "
+                "what temperature, what capacity, who founded it, how many employees, which country.\n\n"
+
+                "2. If the user asks a broad question, give a fuller answer using all relevant information from the context.\n"
+                "   Examples of broad questions: what is Liiontek, what is the SC-V4, explain the system, "
+                "what does the company do, what risks does it solve, what are the safety actions, "
+                "what are the benefits, what is the procedure, how does it work.\n\n"
+
+                "3. For broad questions, DO NOT reduce the answer to one sentence.\n"
+                "   Use the full relevant part of the context. A broad answer should usually be 4 to 8 sentences "
+                "or a clear list if the context is a list.\n\n"
+
+                "4. If the context chunk itself is the best answer, keep most of it and only clean wording lightly.\n\n"
+
+                "5. If the answer is only one line inside the context, return only that line.\n\n"
+
+                "6. Match the answer length to the user question. Do not always be short. Do not always dump everything.\n\n"
 
                 "YES/NO RULE:\n"
-                "- If the user asks a yes/no question and the context clearly supports it, start with Yes or No.\n"
-                "- After Yes or No, include only the relevant supporting sentence(s), not the whole chunk.\n\n"
+                "- If the user asks a yes/no question and the context supports it, start with Yes or No.\n"
+                "- Then give the relevant reason only.\n\n"
 
                 "LANGUAGE RULE:\n"
-                "- Answer in the same language as the user's question when possible.\n"
-                "- If the context is Dutch and the user asks in Dutch, answer in Dutch.\n"
-                "- If the context is English and the user asks in English, answer in English.\n\n"
+                "- Answer in the same language as the user's question when possible.\n\n"
 
                 f"The relevant partner is: {partner_name}."
             )
@@ -756,7 +765,7 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
         {
             "role": "user",
             "content": f"""
-Question:
+User question:
 {question}
 
 Partner context:
@@ -772,7 +781,7 @@ Partner context:
     )
 
     return response.choices[0].message.content.strip()
-
+    
 def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
     """
     For explicitly detected partners, search ONLY their partner_chunks rows
@@ -995,12 +1004,14 @@ def answer_from_triggered_partners(
     message: str,
     embedding,
     triggered_partners: list,
-    user_role: str = "guest"
+    user_role: str = "guest",
+    original_message: str = None
 ):
     """
     Search only the partners that were triggered by keywords.
     Then generate a clean answer instead of returning raw chunks.
     """
+    answer_question = original_message or message
     partner_ids = {
         str(p["partner_id"])
         for p in triggered_partners
@@ -1029,12 +1040,12 @@ def answer_from_triggered_partners(
             )
 
             clean_answer = generate_adaptive_partner_answer(
-                question=message,
+                question=answer_question,
                 partner_name=partner_info["partner_name"],
                 context_chunks=[best_chunk["content"]]
             )
 
-            clean_answer = enforce_yes_no(message, clean_answer)
+            clean_answer = enforce_yes_no(answer_question, clean_answer)
 
             return {
                 "answers": [
@@ -1161,12 +1172,12 @@ def answer_from_triggered_partners(
                     continue
 
                 clean_answer = generate_adaptive_partner_answer(
-                    question=message,
+                    question=answer_question,
                     partner_name=partner_name,
                     context_chunks=selected_chunks
                 )
 
-                clean_answer = enforce_yes_no(message, clean_answer)
+                clean_answer = enforce_yes_no(answer_question, clean_answer)
 
                 formatted_answers.append({
                     "partner_name": partner_name,
@@ -1307,19 +1318,19 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
 
     # Exact partner name match is strong.
-    partner_name_matches = get_partner_name_match(message)
+    partner_name_matches = get_partner_name_match(retrieval_question)
 
     if partner_name_matches:
         result = answer_from_triggered_partners(
             message=retrieval_question,
             embedding=embedding,
-            triggered_partners=triggered_partners,
-            user_role=user_role
+            triggered_partners=partner_name_matches,
+            user_role=user_role,
+            original_message=message
         )
 
         if result:
             return result
-
     # Trigger words are weaker than partner names.
     # They should help retrieval, but must not force a wrong partner.
     triggered_partners = get_partner_trigger_matches(retrieval_question)
@@ -1329,10 +1340,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     if triggered_partners:
         result = answer_from_triggered_partners(
-            message=message,
+            message=retrieval_question,
             embedding=embedding,
             triggered_partners=triggered_partners,
-            user_role=user_role
+            user_role=user_role,
+            original_message=message
         )
 
         if result:
