@@ -658,6 +658,61 @@ Partner context:
 
     return response.choices[0].message.content.strip()
 
+def generate_precise_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
+    """
+    Turns retrieved partner chunks into a concise answer.
+    Prevents dumping the full stored chunk.
+    Answers only the user's exact question using the provided context.
+    """
+    if not context_chunks:
+        return NO_ANSWER_FALLBACK
+
+    context = "\n\n---\n\n".join(context_chunks[:3])
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are TheBridge AI.\n\n"
+                "Answer the user's question using ONLY the provided partner context.\n"
+                "Do not invent details.\n"
+                "Do not mention missing sources.\n"
+                "Do not paste the full chunk.\n"
+                "Do not expose raw database text.\n\n"
+
+                "Answer style rules:\n"
+                "- If the question asks for one fact, answer with only that fact plus a short sentence.\n"
+                "- If the question is yes/no, start with Yes or No, then give the exact reason in one or two sentences.\n"
+                "- If the question asks where something is headquartered, answer only the location/company headquarters sentence.\n"
+                "- If the question asks whether something is designed for something, answer directly and briefly.\n"
+                "- If the context has extra details not needed for the question, do not include them.\n"
+                "- Keep the answer natural, clear, and concise.\n"
+                "- Use the same language as the user's question when possible.\n\n"
+
+                f"The relevant partner is: {partner_name}."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"""
+Question:
+{question}
+
+Partner context:
+{context}
+"""
+        }
+    ]
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0
+    )
+
+    return response.choices[0].message.content.strip()
+    
+
 def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
     """
     For explicitly detected partners, search ONLY their partner_chunks rows
@@ -913,12 +968,20 @@ def answer_from_triggered_partners(
                 if str(p["partner_id"]) == str(best_chunk["partner_id"])
             )
 
+            clean_answer = generate_precise_partner_answer(
+                question=message,
+                partner_name=partner_info["partner_name"],
+                context_chunks=[best_chunk["content"]]
+            )
+
+            clean_answer = enforce_yes_no(message, clean_answer)
+
             return {
                 "answers": [
                     {
                         "partner_name": partner_info["partner_name"],
                         "partner_id": best_chunk["partner_id"],
-                        "answer": best_chunk["content"]
+                        "answer": clean_answer
                     }
                 ],
                 "source": "partner_trigger_chunk_reranked",
@@ -1037,12 +1100,18 @@ def answer_from_triggered_partners(
                 if not selected_chunks:
                     continue
 
-                exact_answer = selected_chunks[0]
+                clean_answer = generate_precise_partner_answer(
+                    question=message,
+                    partner_name=partner_name,
+                    context_chunks=selected_chunks
+                )
+
+                clean_answer = enforce_yes_no(message, clean_answer)
 
                 formatted_answers.append({
                     "partner_name": partner_name,
                     "partner_id": partner_id,
-                    "answer": exact_answer
+                    "answer": clean_answer
                 })
 
         except Exception as e:
@@ -1327,12 +1396,20 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     print("PARTNER FETCH ERROR:", e)
                     partner_name = "Partner"
 
+                clean_answer = generate_precise_partner_answer(
+                    question=message,
+                    partner_name=partner_name,
+                    context_chunks=[best_chunk["content"]]
+                )
+
+                clean_answer = enforce_yes_no(message, clean_answer)
+
                 return {
                     "answers": [
                         {
                             "partner_name": partner_name,
                             "partner_id": best_partner_id,
-                            "answer": best_chunk["content"]
+                            "answer": clean_answer
                         }
                     ],
                     "source": "partner_docs_reranked",
