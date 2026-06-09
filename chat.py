@@ -658,11 +658,12 @@ Partner context:
 
     return response.choices[0].message.content.strip()
 
-def generate_precise_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
+def generate_adaptive_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
     """
-    Turns retrieved partner chunks into a concise answer.
-    Prevents dumping the full stored chunk.
-    Answers only the user's exact question using the provided context.
+    Uses the retrieved partner chunk correctly:
+    - For narrow factual questions, extracts only the relevant sentence(s).
+    - For broad/explanatory questions, allows a fuller answer from the chunk.
+    - Never invents outside the provided context.
     """
     if not context_chunks:
         return NO_ANSWER_FALLBACK
@@ -674,20 +675,28 @@ def generate_precise_partner_answer(question: str, partner_name: str, context_ch
             "role": "system",
             "content": (
                 "You are TheBridge AI.\n\n"
-                "Answer the user's question using ONLY the provided partner context.\n"
+                "Answer using ONLY the provided partner context.\n"
                 "Do not invent details.\n"
-                "Do not mention missing sources.\n"
-                "Do not paste the full chunk.\n"
-                "Do not expose raw database text.\n\n"
+                "Do not mention that you are using context.\n"
+                "Do not expose database/chunk wording unless it is actually the best answer.\n\n"
 
-                "Answer style rules:\n"
-                "- If the question asks for one fact, answer with only that fact plus a short sentence.\n"
-                "- If the question is yes/no, start with Yes or No, then give the exact reason in one or two sentences.\n"
-                "- If the question asks where something is headquartered, answer only the location/company headquarters sentence.\n"
-                "- If the question asks whether something is designed for something, answer directly and briefly.\n"
-                "- If the context has extra details not needed for the question, do not include them.\n"
-                "- Keep the answer natural, clear, and concise.\n"
-                "- Use the same language as the user's question when possible.\n\n"
+                "IMPORTANT ANSWER LENGTH RULE:\n"
+                "- If the user's question asks for one specific fact, return only the sentence or short part of the context that answers it.\n"
+                "- If the answer is clearly contained in one line of the context, use only that line and do not include the rest of the chunk.\n"
+                "- If the user's question is broad, explanatory, asks 'what is', 'explain', 'overview', 'what are', 'list', 'causes', 'risks', 'benefits', 'steps', 'procedure', or asks for multiple items, then include the full relevant information from the chunk.\n"
+                "- If the whole chunk is needed to answer properly, use the whole relevant chunk content, cleaned only for readability.\n"
+                "- Do not make every answer short.\n"
+                "- Do not make every answer long.\n"
+                "- Match the answer length to the question.\n\n"
+
+                "YES/NO RULE:\n"
+                "- If the user asks a yes/no question and the context clearly supports it, start with Yes or No.\n"
+                "- After Yes or No, include only the relevant supporting sentence(s), not the whole chunk.\n\n"
+
+                "LANGUAGE RULE:\n"
+                "- Answer in the same language as the user's question when possible.\n"
+                "- If the context is Dutch and the user asks in Dutch, answer in Dutch.\n"
+                "- If the context is English and the user asks in English, answer in English.\n\n"
 
                 f"The relevant partner is: {partner_name}."
             )
@@ -711,7 +720,6 @@ Partner context:
     )
 
     return response.choices[0].message.content.strip()
-    
 
 def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
     """
@@ -968,7 +976,7 @@ def answer_from_triggered_partners(
                 if str(p["partner_id"]) == str(best_chunk["partner_id"])
             )
 
-            clean_answer = generate_precise_partner_answer(
+            clean_answer = generate_adaptive_partner_answer(
                 question=message,
                 partner_name=partner_info["partner_name"],
                 context_chunks=[best_chunk["content"]]
@@ -1100,7 +1108,7 @@ def answer_from_triggered_partners(
                 if not selected_chunks:
                     continue
 
-                clean_answer = generate_precise_partner_answer(
+                clean_answer = generate_adaptive_partner_answer(
                     question=message,
                     partner_name=partner_name,
                     context_chunks=selected_chunks
@@ -1396,7 +1404,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     print("PARTNER FETCH ERROR:", e)
                     partner_name = "Partner"
 
-                clean_answer = generate_precise_partner_answer(
+                clean_answer = generate_adaptive_partner_answer(
                     question=message,
                     partner_name=partner_name,
                     context_chunks=[best_chunk["content"]]
