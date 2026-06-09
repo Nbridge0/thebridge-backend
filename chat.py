@@ -352,6 +352,58 @@ def get_chat_history(chat_id: int, limit: int = 15):
         print("HISTORY ERROR:", e)
         return []
 
+def rewrite_followup_question(message: str, history: list) -> str:
+    """
+    Rewrites follow-up questions into standalone retrieval questions using chat history.
+    Generic: works for any partner, product, company, system, or topic.
+    """
+    if not history:
+        return message
+
+    try:
+        recent_history = history[-6:]
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You rewrite user questions for search/retrieval.\n"
+                        "Use the recent conversation to resolve references like it, they, this company, "
+                        "that system, the cabinet, the product, this, that, he, she, them.\n\n"
+                        "Rules:\n"
+                        "- Return ONLY the rewritten standalone question.\n"
+                        "- Do not answer the question.\n"
+                        "- Do not add facts.\n"
+                        "- Do not invent a topic.\n"
+                        "- If the user question is already standalone, return it unchanged.\n"
+                        "- Preserve the user's language.\n"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "recent_history": recent_history,
+                        "latest_user_question": message
+                    })
+                }
+            ],
+            temperature=0
+        )
+
+        rewritten = response.choices[0].message.content.strip()
+
+        if not rewritten:
+            return message
+
+        return rewritten
+
+    except Exception as e:
+        print("FOLLOWUP REWRITE ERROR:", e)
+        return message
+
+
 def clean_chunks(chunks):
     seen = set()
     cleaned = []
@@ -1186,6 +1238,11 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     print("HISTORY DEBUG:", history)
     answer_found = False
 
+        # Generic context-aware retrieval question
+    retrieval_question = rewrite_followup_question(message, history)
+
+    print("RETRIEVAL QUESTION DEBUG:", retrieval_question)
+
     # =====================================================
 # 🔥 CONTEXT CONTINUATION
 # =====================================================
@@ -1234,7 +1291,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
     try:
         cleaned_question = normalize_question_for_search(
-            enrich_question(message)
+            enrich_question(retrieval_question)
         )
 
         embedding = client.embeddings.create(
@@ -1254,9 +1311,9 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     if partner_name_matches:
         result = answer_from_triggered_partners(
-            message=message,
+            message=retrieval_question,
             embedding=embedding,
-            triggered_partners=partner_name_matches,
+            triggered_partners=triggered_partners,
             user_role=user_role
         )
 
@@ -1265,7 +1322,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
     # Trigger words are weaker than partner names.
     # They should help retrieval, but must not force a wrong partner.
-    triggered_partners = get_partner_trigger_matches(message)
+    triggered_partners = get_partner_trigger_matches(retrieval_question)
 
     print("PARTNER NAME MATCHES DEBUG:", partner_name_matches)
     print("TRIGGERED PARTNERS DEBUG:", triggered_partners)
@@ -1387,7 +1444,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 reverse=True
             )
 
-            best_chunk = choose_best_chunk_with_ai(message, semantic_results)
+            best_chunk = choose_best_chunk_with_ai(retrieval_question, semantic_results)
 
             if best_chunk:
                 best_partner_id = best_chunk["partner_id"]
