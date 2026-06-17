@@ -75,6 +75,16 @@ def profile_exists(email: str) -> bool:
         print("PROFILE CHECK ERROR:", e)
         return False
 
+def track_user_signin(email: str):
+    email = email.lower().strip()
+
+    try:
+        supabase_admin.table("user_signins").insert({
+            "user_email": email
+        }).execute()
+    except Exception as e:
+        print("SIGNIN TRACK ERROR:", e)
+
 
 VERIFICATION_EMAIL_SUBJECT = "Almost There! Verify Your TheBridge Account"
 
@@ -832,6 +842,8 @@ def login(req: LoginRequest):
             "password": req.password
         })
 
+        track_user_signin(email)
+
         profile = (
             supabase_admin
             .table("user_profiles")
@@ -850,6 +862,7 @@ def login(req: LoginRequest):
 
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+        
 @app.delete("/auth/account")
 def delete_user_account(req: DeleteAccountRequest):
     email = req.email.lower().strip()
