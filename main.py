@@ -270,6 +270,9 @@ class ResetConfirmRequest(BaseModel):
     email: EmailStr
     new_password: str
 
+class DeleteAccountRequest(BaseModel):
+    email: EmailStr
+
 class CreateChatRequest(BaseModel):
     user_email: EmailStr
     title: str
@@ -292,7 +295,12 @@ class ChatRequest(BaseModel):
     message: str
     user_role: str = "guest"
     user_email: Optional[str] = None
-    history: Optional[list] = []   # ✅ ADD THIS
+    history: Optional[list] = []
+
+class UpdateProfileRequest(BaseModel):
+    current_email: EmailStr
+    name: str
+    email: EmailStr
 
 
 @app.put("/chats/{chat_id}/rename")
@@ -485,6 +493,154 @@ def chat_ask_ai(req: dict):
 # AUTH
 # -------------------------
 
+@app.get("/auth/profile")
+def get_profile(email: EmailStr):
+    email = email.lower().strip()
+
+    try:
+        profile = (
+            supabase_admin
+            .table("user_profiles")
+            .select("id, name, email, newsletter")
+            .eq("email", email)
+            .single()
+            .execute()
+        )
+
+        if not profile.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Profile not found"
+            )
+
+        return profile.data
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("GET PROFILE ERROR:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load profile"
+        )
+
+
+@app.put("/auth/profile")
+def update_profile(req: UpdateProfileRequest):
+    current_email = req.current_email.lower().strip()
+    new_email = req.email.lower().strip()
+    new_name = req.name.strip()
+
+    if not new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Name is required"
+        )
+
+    try:
+        user = get_user_by_email(current_email)
+
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # If email is changing, check that new email is not already used
+        if new_email != current_email:
+            existing_user = get_user_by_email(new_email)
+
+            if existing_user:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This email is already in use"
+                )
+
+        # 1. Update Supabase Auth user
+        supabase_admin.auth.admin.update_user_by_id(
+            user.id,
+            {
+                "email": new_email,
+                "email_confirm": True,
+                "user_metadata": {
+                    "name": new_name
+                }
+            }
+        )
+
+        # 2. Update profile
+        (
+            supabase_admin
+            .table("user_profiles")
+            .update({
+                "name": new_name,
+                "email": new_email
+            })
+            .eq("email", current_email)
+            .execute()
+        )
+
+        # 3. Keep chats attached to the new email
+        (
+            supabase_admin
+            .table("user_chats")
+            .update({"user_email": new_email})
+            .eq("user_email", current_email)
+            .execute()
+        )
+
+        # 4. Keep messages attached to the new email
+        (
+            supabase_admin
+            .table("chat_messages")
+            .update({"user_email": new_email})
+            .eq("user_email", current_email)
+            .execute()
+        )
+
+        # 5. Keep click tracking attached to the new email
+        (
+            supabase_admin
+            .table("user_clicks")
+            .update({"user_email": new_email})
+            .eq("user_email", current_email)
+            .execute()
+        )
+
+        # 6. Update pending reset / verification rows if any exist
+        (
+            supabase_admin
+            .table("password_resets")
+            .update({"email": new_email})
+            .eq("email", current_email)
+            .execute()
+        )
+
+        (
+            supabase_admin
+            .table("email_verifications")
+            .update({"email": new_email})
+            .eq("email", current_email)
+            .execute()
+        )
+
+        return {
+            "status": "updated",
+            "name": new_name,
+            "email": new_email
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print("UPDATE PROFILE ERROR:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Profile update failed"
+        )
+
 @app.post("/auth/signup")
 def signup(req: SignupRequest):
     email = req.email.lower().strip()
@@ -675,43 +831,114 @@ def login(req: LoginRequest):
             "email": email,
             "password": req.password
         })
-        return {"status": "ok", "user": auth.user}
+
+        profile = (
+            supabase_admin
+            .table("user_profiles")
+            .select("name, email")
+            .eq("email", email)
+            .single()
+            .execute()
+        )
+
+        return {
+            "status": "ok",
+            "user": auth.user,
+            "name": profile.data.get("name") if profile.data else None,
+            "email": email
+        }
+
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+@app.delete("/auth/account")
+def delete_user_account(req: DeleteAccountRequest):
+    email = req.email.lower().strip()
 
-@app.delete("/auth/user")
-def delete_user_account(email: EmailStr):
-    email = email.lower().strip()
+    try:
+        # 1. Find Supabase Auth user first
+        user = get_user_by_email(email)
 
-    # Delete chats/messages first if you want full cleanup
-    chats = supabase_admin.table("user_chats") \
-        .select("id") \
-        .eq("user_email", email) \
-        .execute()
-
-    for chat in chats.data or []:
-        supabase_admin.table("chat_messages") \
-            .delete() \
-            .eq("chat_id", chat["id"]) \
+        # 2. Get this user's chats
+        chats = (
+            supabase_admin
+            .table("user_chats")
+            .select("id")
+            .eq("user_email", email)
             .execute()
+        )
 
-    supabase_admin.table("user_chats") \
-        .delete() \
-        .eq("user_email", email) \
-        .execute()
+        chat_ids = [chat["id"] for chat in chats.data or []]
 
-    # Delete profile
-    supabase_admin.table("user_profiles") \
-        .delete() \
-        .eq("email", email) \
-        .execute()
+        # 3. Delete chat messages for those chats
+        if chat_ids:
+            (
+                supabase_admin
+                .table("chat_messages")
+                .delete()
+                .in_("chat_id", chat_ids)
+                .execute()
+            )
 
-    # Delete Supabase Auth user
-    user = get_user_by_email(email)
-    if user:
-        supabase_admin.auth.admin.delete_user(user.id)
+        # 4. Delete user's chats
+        (
+            supabase_admin
+            .table("user_chats")
+            .delete()
+            .eq("user_email", email)
+            .execute()
+        )
 
-    return {"status": "user_deleted"}
+        # 5. Delete click analytics for this user
+        (
+            supabase_admin
+            .table("user_clicks")
+            .delete()
+            .eq("user_email", email)
+            .execute()
+        )
+
+        # 6. Delete any pending password reset rows
+        (
+            supabase_admin
+            .table("password_resets")
+            .delete()
+            .eq("email", email)
+            .execute()
+        )
+
+        # 7. Delete any pending verification rows
+        (
+            supabase_admin
+            .table("email_verifications")
+            .delete()
+            .eq("email", email)
+            .execute()
+        )
+
+        # 8. Delete user profile
+        (
+            supabase_admin
+            .table("user_profiles")
+            .delete()
+            .eq("email", email)
+            .execute()
+        )
+
+        # 9. Delete Supabase Auth user
+        if user:
+            supabase_admin.auth.admin.delete_user(user.id)
+
+        return {
+            "status": "deleted",
+            "email": email
+        }
+
+    except Exception as e:
+        print("DELETE ACCOUNT ERROR:", repr(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Account deletion failed"
+        )
 # -------------------------
 # PASSWORD RESET (BASIC)
 # -------------------------
