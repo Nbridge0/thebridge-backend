@@ -245,61 +245,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
         print("TRANSCRIPTION ERROR:", e)
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-@app.post("/answer/action")
-def save_answer_action(req: AnswerActionRequest):
-    allowed_actions = {"share", "good", "bad", "read"}
-
-    if req.action not in allowed_actions:
-        raise HTTPException(status_code=400, detail="Invalid action")
-
-    try:
-        supabase_admin.table("answer_actions").insert({
-            "chat_id": req.chat_id,
-            "user_email": req.user_email,
-            "user_type": "user" if req.user_role != "guest" else "guest",
-            "action": req.action,
-            "answer_text": req.answer_text,
-            "source": req.source
-        }).execute()
-
-        return {"status": "saved"}
-
-    except Exception as e:
-        print("ANSWER ACTION SAVE ERROR:", e)
-        raise HTTPException(status_code=500, detail="Failed to save answer action")
-
-@app.post("/tts")
-def text_to_speech(req: TTSRequest):
-    text = (req.text or "").strip()
-
-    if not text:
-        raise HTTPException(status_code=400, detail="Text is required")
-
-    # Keep requests safe and fast
-    if len(text) > 4000:
-        text = text[:4000]
-
-    try:
-        speech = openai_client.audio.speech.create(
-            model="gpt-4o-mini-tts",
-            voice="nova",
-            input=text,
-            response_format="mp3",
-            instructions=(
-                "Speak clearly in a warm, professional, female-sounding voice. "
-                "Automatically pronounce the input in its original language. "
-                "Keep the tone calm, natural, and easy to understand."
-            )
-        )
-
-        return Response(
-            content=speech.content,
-            media_type="audio/mpeg"
-        )
-
-    except Exception as e:
-        print("TTS ERROR:", e)
-        raise HTTPException(status_code=500, detail="Text to speech failed")
 
 # -------------------------
 # MODELS
@@ -378,6 +323,63 @@ class UpdateProfileRequest(BaseModel):
     current_email: EmailStr
     name: str
     email: EmailStr
+
+@app.post("/answer/action")
+def save_answer_action(req: AnswerActionRequest):
+    allowed_actions = {"share", "good", "bad", "read"}
+
+    if req.action not in allowed_actions:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    try:
+        supabase_admin.table("answer_actions").insert({
+            "chat_id": req.chat_id,
+            "user_email": req.user_email,
+            "user_type": "user" if req.user_role != "guest" else "guest",
+            "action": req.action,
+            "answer_text": req.answer_text,
+            "source": req.source
+        }).execute()
+
+        return {"status": "saved"}
+
+    except Exception as e:
+        print("ANSWER ACTION SAVE ERROR:", e)
+        raise HTTPException(status_code=500, detail="Failed to save answer action")
+
+@app.post("/tts")
+def text_to_speech(req: TTSRequest):
+    text = (req.text or "").strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    # Keep requests safe and fast
+    if len(text) > 4000:
+        text = text[:4000]
+
+    try:
+        speech = openai_client.audio.speech.create(
+            model="gpt-4o-mini-tts",
+            voice="nova",
+            input=text,
+            response_format="mp3",
+            instructions=(
+                "Speak clearly in a warm, professional, female-sounding voice. "
+                "Automatically pronounce the input in its original language. "
+                "Keep the tone calm, natural, and easy to understand."
+            )
+        )
+
+        return Response(
+            content=speech.content,
+            media_type="audio/mpeg"
+        )
+
+    except Exception as e:
+        print("TTS ERROR:", e)
+        raise HTTPException(status_code=500, detail="Text to speech failed")
+
 
 
 @app.put("/chats/{chat_id}/rename")
