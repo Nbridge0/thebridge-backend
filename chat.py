@@ -1432,7 +1432,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 "new_title": None
             }
 
-# =====================================================
+    # =====================================================
 # 5️⃣ PARTNER DOCS
 # =====================================================
     if embedding:
@@ -1549,16 +1549,24 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
-    # =====================================================
-    # AUTOMATIC GPT FALLBACK
-    # =====================================================
+    yachting_keywords = [
+        "yacht", "crew", "captain", "flag", "port state",
+        "manning", "inspection", "maritime"
+    ]
 
+    if any(k in user_norm for k in yachting_keywords):
+        return {
+            "answer": NO_ANSWER_FALLBACK,
+            "source": "no_answer",
+            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
+            "requires_auth": user_role == "guest",
+            "new_title": None
+        }
+
+    # AI fallback
     messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
-    messages.append({
-        "role": "user",
-        "content": message
-    })
+    messages.append({"role": "user", "content": message})
 
     try:
         response = client.chat.completions.create(
@@ -1566,30 +1574,17 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             messages=messages,
             temperature=0.7
         )
-
-        ai_answer = response.choices[0].message.content.strip()
-        ai_answer = enforce_yes_no(message, ai_answer)
-
-        final_answer = (
-            "Oops, we don’t have the answer yet, "
-            "but here is the AI answer:\n\n"
-            f"{ai_answer}"
-        )
-
+        answer = response.choices[0].message.content.strip()
+        answer = enforce_yes_no(message, answer)
     except Exception as e:
-        print("OPENAI FALLBACK ERROR:", e)
-
-        final_answer = (
-            "Oops, we don’t have the answer yet, "
-            "and the AI answer is temporarily unavailable."
-        )
+        print("OPENAI ERROR:", e)
+        answer = "⚠️ AI temporary error. Please try again."
 
     return {
-        "answer": final_answer,
-        "source": "automatic_ai_fallback",
-        "badge": "AI Answer",
-        "actions": ["ask_specialist", "ask_ambassador"],
-        "requires_auth": user_role == "guest",
+        "answer": answer,
+        "source": "openai_general",
+        "actions": [],
+        "requires_auth": False,
         "new_title": None
     }
 
