@@ -762,12 +762,12 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "PARTNER RECOMMENDATION RULE:\n"
                 "- If the user asks for a provider, supplier, company, bank, recommendation, "
                 "or asks who they should use, clearly recommend the relevant partner.\n"
-                "- If the user describes a need that the relevant partner can solve, "
-                "naturally recommend that partner even if the user did not mention the partner by name.\n"
-                "- Mention the relevant partner naturally near the beginning of the answer.\n"
-                "- Explain why the partner is relevant using ONLY the supplied partner context.\n"
-                "- Do not invent other providers or competitors.\n"
-                "- Do not recommend the partner if the supplied context does not actually match the user's need.\n\n"
+                "- If the supplied partner context contains a website or contact details, "
+                "include those details when recommending the partner.\n"
+                "- If the user specifically asks how to contact the partner, always include "
+                "all website and contact information available in the supplied context.\n"
+                "- Only use contact information present in the supplied partner context.\n"
+                "- Do not invent contact details.\n\n"
 
                 f"The relevant partner is: {partner_name}."
             )
