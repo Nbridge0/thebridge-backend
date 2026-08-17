@@ -1219,6 +1219,36 @@ def answer_from_triggered_partners(
     # =====================================================
     # 3. Partner was clearly triggered, but no answer found
     # =====================================================
+    if triggered_partners:
+        partner_info = triggered_partners[0]
+
+        partner_name = partner_info["partner_name"]
+        partner_id = partner_info["partner_id"]
+        matched_trigger = partner_info.get("trigger", "")
+
+        return {
+            "answers": [
+                {
+                    "partner_name": partner_name,
+                    "partner_id": partner_id,
+                    "answer": (
+                        f"For {matched_trigger or 'this requirement'}, "
+                        f"I'd recommend {partner_name}, one of TheBridge's partners. "
+                        f"They are the relevant partner for this area."
+                    )
+                }
+            ],
+            "source": "partner_trigger_referral",
+            "badge": "Partners",
+            "actions": [
+                "ask_ai",
+                "ask_specialist",
+                "ask_ambassador"
+            ],
+            "requires_auth": False,
+            "new_title": None
+        }
+
     return None
 
 def detect_system(message: str):
