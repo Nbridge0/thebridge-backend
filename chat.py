@@ -759,14 +759,15 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "LANGUAGE RULE:\n"
                 "- Answer in the same language as the user's question when possible.\n\n"
 
-                "RECOMMENDATION RULE:\n"
-                "- If the user asks for the best provider, supplier, company, product source, or asks for a recommendation, recommend the relevant partner directly when the supplied context actually matches the requested category.\n"
-                "- State the partner name clearly near the beginning of the answer.\n"
-                "- Explain the recommendation only using the supplied partner context.\n"
-                "- Do not claim the partner is objectively the world's best unless the context explicitly supports that claim.\n"
-                "- If the supplied context does not match the requested category, do not recommend that partner.\n\n"
-
-f"The relevant partner is: {partner_name}."
+                "PARTNER RECOMMENDATION RULE:\n"
+                "- If the user asks for a provider, supplier, company, bank, recommendation, "
+                "or asks who they should use, clearly recommend the relevant partner.\n"
+                "- If the user describes a need that the relevant partner can solve, "
+                "naturally recommend that partner even if the user did not mention the partner by name.\n"
+                "- Mention the relevant partner naturally near the beginning of the answer.\n"
+                "- Explain why the partner is relevant using ONLY the supplied partner context.\n"
+                "- Do not invent other providers or competitors.\n"
+                "- Do not recommend the partner if the supplied context does not actually match the user's need.\n\n"
 
                 f"The relevant partner is: {partner_name}."
             )
