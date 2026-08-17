@@ -759,6 +759,15 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "LANGUAGE RULE:\n"
                 "- Answer in the same language as the user's question when possible.\n\n"
 
+                "RECOMMENDATION RULE:\n"
+                "- If the user asks for the best provider, supplier, company, product source, or asks for a recommendation, recommend the relevant partner directly when the supplied context actually matches the requested category.\n"
+                "- State the partner name clearly near the beginning of the answer.\n"
+                "- Explain the recommendation only using the supplied partner context.\n"
+                "- Do not claim the partner is objectively the world's best unless the context explicitly supports that claim.\n"
+                "- If the supplied context does not match the requested category, do not recommend that partner.\n\n"
+
+f"The relevant partner is: {partner_name}."
+
                 f"The relevant partner is: {partner_name}."
             )
         },
@@ -910,9 +919,12 @@ def choose_best_chunk_with_ai(message: str, chunks: list):
                             "- Choose the chunk that directly answers the user's exact question.\n"
                             "- Do not choose a chunk only because it shares one keyword with the question.\n"
                             "- If the user asks what something means, choose an explanatory/definition chunk.\n"
-                            "- If the user mentions a need, object, system, product, or equipment, prioritize chunks about that thing, not the person/company who requested it.\n"
+                            "- If the user mentions a need, object, system, product, service, category, or equipment, prioritize chunks about that exact thing.\n"
                             "- For 'who is' or 'what is' questions, prefer overview/definition chunks.\n"
                             "- Do not choose a narrow capability, technical, pricing, insurance, network, troubleshooting, or safety chunk unless the user specifically asked about that topic.\n"
+                            "- If the user asks for the best provider, supplier, company, product source, or recommendation, the selected partner chunk MUST actually describe that requested category or service.\n"
+                            "- Never select a partner just because the user used words like 'best', 'provider', 'supplier', or 'recommend'.\n"
+                            "- If the requested category and the partner's actual offering are different, reject that chunk.\n"
                             "- If none of the chunks directly answer the question, return null.\n\n"
                             "Return JSON only:\n"
                             "{\"index\": 0}\n"
@@ -1456,7 +1468,18 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 reverse=True
             )
 
-            best_chunk = choose_best_chunk_with_ai(retrieval_question, semantic_results)
+            top_similarity = semantic_results[0].get(
+                "similarity",
+                semantic_results[0].get("score", 0)
+            )
+
+            if top_similarity >= 0.45:
+                best_chunk = choose_best_chunk_with_ai(
+                    retrieval_question,
+                    semantic_results
+                )
+            else:
+                best_chunk = None
 
             if best_chunk:
                 best_partner_id = best_chunk["partner_id"]
