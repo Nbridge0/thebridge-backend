@@ -759,15 +759,12 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "LANGUAGE RULE:\n"
                 "- Answer in the same language as the user's question when possible.\n\n"
 
-                "PARTNER RECOMMENDATION RULE:\n"
-                "- If the user asks for a provider, supplier, company, bank, recommendation, "
-                "or asks who they should use, clearly recommend the relevant partner.\n"
-                "- If the supplied partner context contains a website or contact details, "
-                "include those details when recommending the partner.\n"
-                "- If the user specifically asks how to contact the partner, always include "
-                "all website and contact information available in the supplied context.\n"
-                "- Only use contact information present in the supplied partner context.\n"
-                "- Do not invent contact details.\n\n"
+                "CONTACT DETAILS RULE:\n"
+                "- Include website, email, phone, or other contact details ONLY when they are useful for answering the user's actual question.\n"
+                "- Include contact details when the user asks how to contact, reach, enquire with, apply through, buy from, or get in touch with the partner.\n"
+                "- Contact details may also be included when the user explicitly asks for a provider/recommendation and the details are useful for taking the next step.\n"
+                "- For normal informational questions about a partner, do NOT add contact details unnecessarily.\n"
+                "- Only use contact details that exist in the supplied partner context. Never invent them.\n\n"
 
                 f"The relevant partner is: {partner_name}."
             )
