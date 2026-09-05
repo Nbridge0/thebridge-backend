@@ -1363,6 +1363,76 @@ def is_low_information_query(message: str) -> bool:
 
     return msg in vague_phrases
 
+def is_substantive_user_question(
+    message: str,
+    history: list = None
+) -> bool:
+    """
+    Distinguishes a real information/help request from ordinary
+    conversational chat.
+
+    No topic, product, partner, industry or question is hard-coded.
+    """
+
+    clean_message = str(message or "").strip()
+
+    if not clean_message:
+        return False
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify the user's CURRENT message.\n\n"
+
+                        "Return exactly one word:\n"
+                        "SUBSTANTIVE\n"
+                        "or\n"
+                        "CONVERSATIONAL\n\n"
+
+                        "SUBSTANTIVE means the user is genuinely asking for "
+                        "information, advice, an explanation, a recommendation, "
+                        "a procedure, troubleshooting, comparison, factual help, "
+                        "professional help, or another meaningful answer.\n\n"
+
+                        "CONVERSATIONAL means ordinary casual conversation, "
+                        "pleasantries, social chat, or a message that does not "
+                        "represent a substantive information/help request.\n\n"
+
+                        "Judge this semantically from the actual message. "
+                        "Do not use fixed topic lists or keyword matching. "
+                        "Return ONLY the classification."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": clean_message
+                }
+            ],
+            temperature=0
+        )
+
+        classification = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+            .upper()
+        )
+
+        return classification == "SUBSTANTIVE"
+
+    except Exception as e:
+        print("SUBSTANTIVE CLASSIFIER ERROR:", e)
+
+        # Safe fallback:
+        # don't falsely label ordinary conversation as missing knowledge.
+        return False
+
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -1689,45 +1759,28 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     "new_title": None
                 }
 
-    yachting_keywords = [
-        "yacht", "crew", "captain", "flag", "port state",
-        "manning", "inspection", "maritime"
+    # =====================================================
+# 7B. NOTHING VERIFIED FOUND
+# =====================================================
+
+    substantive_question = is_substantive_user_question(
+        message,
+        history
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": BASE_SYSTEM_PROMPT
+        }
     ]
 
-    if any(k in user_norm for k in yachting_keywords):
-
-        try:
-            ai_answer = ask_ai_only(
-                message,
-                chat_id,
-                history
-            ) 
-
-            answer = (
-                "Oops, we don’t have the answer, but here is the AI answer:\n\n"
-                f"{ai_answer}"
-            )
-
-        except Exception as e:
-            print("AUTO AI FALLBACK ERROR:", e)
-
-            answer = (
-                "Oops, we don’t have the answer right now. "
-                "Please try again."
-            )
-
-        return {
-            "answer": answer,
-            "source": "openai_auto_fallback",
-            "actions": ["ask_specialist", "ask_ambassador"],
-            "requires_auth": False,
-            "new_title": None
-        }
-
-    # AI fallback
-    messages = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
-    messages.append({"role": "user", "content": message})
+
+    messages.append({
+        "role": "user",
+        "content": message
+    })
 
     try:
         response = client.chat.completions.create(
@@ -1735,15 +1788,63 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             messages=messages,
             temperature=0.7
         )
-        answer = response.choices[0].message.content.strip()
-        answer = enforce_yes_no(message, answer)
-    
+
+        ai_answer = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        ai_answer = enforce_yes_no(
+            message,
+            ai_answer
+        )
+
     except Exception as e:
         print("OPENAI ERROR:", e)
-        answer = "⚠️ AI temporary error. Please try again."
+
+        return {
+            "answer": "⚠️ AI temporary error. Please try again.",
+            "source": "error",
+            "actions": [],
+            "requires_auth": False,
+            "new_title": None
+        }
+
+
+# =====================================================
+# SUBSTANTIVE QUESTION:
+# no verified TheBridge/partner answer was found
+# =====================================================
+
+    if substantive_question:
+
+        answer = (
+            "Oops, we don’t have the answer, "
+            "but here is the AI answer:\n\n"
+            f"{ai_answer}"
+        )
+
+        return {
+            "answer": answer,  
+            "source": "openai_auto_fallback",
+            "actions": [
+                "ask_specialist",
+                "ask_ambassador"
+            ],
+            "requires_auth": user_role == "guest",
+            "new_title": None
+        }
+
+
+# =====================================================
+# ORDINARY GENERAL CONVERSATION
+# =====================================================
 
     return {
-        "answer": answer,
+        "answer": ai_answer,
         "source": "openai_general",
         "actions": [],
         "requires_auth": False,
