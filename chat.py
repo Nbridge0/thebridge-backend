@@ -113,11 +113,10 @@ def add_contextual_helpful_ending(
     answer: str
 ) -> str:
     """
-    Adds one short, context-aware next-step question
-    without changing the original answer.
+    Adds one short context-aware next-step question only when
+    the conversation is substantive and a useful next action exists.
 
-    Nothing is hard-coded by topic, task, location,
-    product, partner, or question type.
+    Ordinary/general conversation is left unchanged.
     """
 
     clean_question = str(question or "").strip()
@@ -133,24 +132,37 @@ def add_contextual_helpful_ending(
                 {
                     "role": "system",
                     "content": (
-                        "Generate exactly one short and useful follow-up "
-                        "question to place at the END of an assistant answer.\n\n"
+                        "Decide whether the assistant answer would genuinely "
+                        "benefit from one short useful next-step question.\n\n"
 
-                        "The follow-up must be inferred dynamically from the "
-                        "user's actual question and the assistant's actual answer.\n\n"
+                        "Do NOT add a follow-up for ordinary general conversation, "
+                        "greetings, pleasantries, casual chat, simple conversational "
+                        "remarks, or situations where no useful next action exists.\n\n"
 
-                        "Rules:\n"
-                        "- Suggest the most useful logical next step the assistant can help with.\n"
-                        "- It may offer a related task, comparison, explanation, practical next step, or related information when appropriate.\n"
+                        "A follow-up may be appropriate when the conversation is "
+                        "substantive and there is a useful next action, related task, "
+                        "comparison, procedure, practical step, further explanation, "
+                        "decision, recommendation, troubleshooting step, or related "
+                        "information the assistant can reasonably help with.\n\n"
+
+                        "The decision and wording must come entirely from the actual "
+                        "user question and assistant answer. Do not classify using "
+                        "hard-coded topic names or keyword lists.\n\n"
+
+                        "If NO follow-up should be added, return exactly:\n"
+                        "NONE\n\n"
+
+                        "If a follow-up IS useful:\n"
+                        "- Return exactly one short question.\n"
+                        "- Infer it dynamically from the actual question and answer.\n"
+                        "- Suggest the most useful logical next step.\n"
                         "- Do not use a fixed template.\n"
                         "- Do not repeat the same type of suggestion every time.\n"
-                        "- Do not invent facts, businesses, places, products, services, or options.\n"
+                        "- Do not invent facts, companies, places, products, or services.\n"
                         "- Do not introduce an unrelated topic.\n"
-                        "- Keep it professional, natural, and lightly conversational.\n"
-                        "- Do not sound overly enthusiastic, sales-like, or overly friendly.\n"
-                        "- Return ONLY the single follow-up question.\n"
-                        "- Do not repeat or rewrite the original answer.\n"
-                        "- Keep it to one sentence."
+                        "- Keep it professional and lightly conversational.\n"
+                        "- Do not sound overly friendly, enthusiastic, or sales-like.\n"
+                        "- Do not rewrite or repeat the original answer."
                     )
                 },
                 {
@@ -161,7 +173,7 @@ def add_contextual_helpful_ending(
                     )
                 }
             ],
-            temperature=0.5
+            temperature=0.3
         )
 
         ending = (
@@ -173,6 +185,9 @@ def add_contextual_helpful_ending(
         )
 
         if not ending:
+            return clean_answer
+
+        if ending.upper() == "NONE":
             return clean_answer
 
         return f"{clean_answer}\n\n{ending}"
