@@ -2,7 +2,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from chat import get_answer, send_help_request, ask_ai_only, save_message, track_click
+from chat import (
+    get_answer,
+    send_help_request,
+    ask_ai_only,
+    save_message,
+    track_click,
+    add_contextual_helpful_ending
+)
 from supabase import create_client
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -680,6 +687,10 @@ async def chat_attachment(
             .content
             .strip()
         )
+        answer = add_contextual_helpful_ending(
+            user_question,
+            answer
+        )
 
         source = "chat_image_attachment"
 
@@ -744,6 +755,11 @@ async def chat_attachment(
             .message
             .content
             .strip()
+        )
+
+        answer = add_contextual_helpful_ending(
+            user_question,
+            answer
         )
 
         source = "chat_document_attachment"

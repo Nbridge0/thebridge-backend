@@ -108,6 +108,79 @@ BASE_SYSTEM_PROMPT = (
     "Maintain a confident, natural, human tone."
 )
 
+def add_contextual_helpful_ending(
+    question: str,
+    answer: str
+) -> str:
+    """
+    Adds one short, context-aware next-step question
+    without changing the original answer.
+
+    Nothing is hard-coded by topic, task, location,
+    product, partner, or question type.
+    """
+
+    clean_question = str(question or "").strip()
+    clean_answer = str(answer or "").strip()
+
+    if not clean_answer:
+        return clean_answer
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Generate exactly one short and useful follow-up "
+                        "question to place at the END of an assistant answer.\n\n"
+
+                        "The follow-up must be inferred dynamically from the "
+                        "user's actual question and the assistant's actual answer.\n\n"
+
+                        "Rules:\n"
+                        "- Suggest the most useful logical next step the assistant can help with.\n"
+                        "- It may offer a related task, comparison, explanation, practical next step, or related information when appropriate.\n"
+                        "- Do not use a fixed template.\n"
+                        "- Do not repeat the same type of suggestion every time.\n"
+                        "- Do not invent facts, businesses, places, products, services, or options.\n"
+                        "- Do not introduce an unrelated topic.\n"
+                        "- Keep it professional, natural, and lightly conversational.\n"
+                        "- Do not sound overly enthusiastic, sales-like, or overly friendly.\n"
+                        "- Return ONLY the single follow-up question.\n"
+                        "- Do not repeat or rewrite the original answer.\n"
+                        "- Keep it to one sentence."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"User question:\n{clean_question}\n\n"
+                        f"Assistant answer:\n{clean_answer}"
+                    )
+                }
+            ],
+            temperature=0.5
+        )
+
+        ending = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        if not ending:
+            return clean_answer
+
+        return f"{clean_answer}\n\n{ending}"
+
+    except Exception as e:
+        print("HELPFUL ENDING ERROR:", e)
+        return clean_answer
+
 # -------------------------------
 # UTILITIES
 # -------------------------------
@@ -248,7 +321,12 @@ def ask_openai(question: str) -> str:
             {"role": "user", "content": question},
         ],
     )
-    return r.choices[0].message.content.strip()
+    answer = r.choices[0].message.content.strip()
+
+    return add_contextual_helpful_ending(
+        question,
+        answer
+    )
 
 def enrich_question(question: str) -> str:
     return question.lower()
@@ -708,7 +786,12 @@ Partner context:
         temperature=0
     )
 
-    return response.choices[0].message.content.strip()
+    answer = response.choices[0].message.content.strip()
+
+    return add_contextual_helpful_ending(
+        question,
+        answer
+    )
 
 def generate_adaptive_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
     """
@@ -787,7 +870,12 @@ Partner context:
         temperature=0
     )
 
-    return response.choices[0].message.content.strip()
+    answer = response.choices[0].message.content.strip()
+
+    return add_contextual_helpful_ending(
+        question,
+        answer
+    )
     
 def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
     """
@@ -1330,7 +1418,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             )
 
             return {
-                "answer": response.choices[0].message.content.strip(),
+                "answer": add_contextual_helpful_ending(
+                    message,
+                    response.choices[0].message.content.strip()
+                ),
                 "source": "continuation",
                 "actions": [],
                 "requires_auth": False, 
@@ -1627,6 +1718,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         )
         answer = response.choices[0].message.content.strip()
         answer = enforce_yes_no(message, answer)
+        answer = add_contextual_helpful_ending(
+            message,
+            answer
+        )
     except Exception as e:
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
