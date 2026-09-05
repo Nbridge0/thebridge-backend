@@ -593,6 +593,14 @@ async def chat_attachment(
             "Analyse this attachment and explain the relevant "
             "information clearly."
         )
+        
+    track_click(
+        chat_id=chat_id,
+        button="question",
+        question=user_question,
+        user_email=user_email,
+        user_role=user_role
+    )
 
 
     # =====================================================
@@ -779,6 +787,17 @@ async def chat_attachment(
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
 
+    # =====================================================
+    # TRACK EVERY QUESTION — USERS + GUESTS
+    # =====================================================
+    track_click(
+        chat_id=req.chat_id,
+        button="question",
+        question=req.message,
+        user_email=req.user_email,
+        user_role=req.user_role
+    )
+
     # ✅ FIX: Ensure chat exists (important for suggested questions)
     if req.chat_id is None and req.user_email:
         new_chat = supabase_admin.table("user_chats").insert({
@@ -844,8 +863,6 @@ def chat_message(req: ChatRequest):
     "requires_auth": requires_auth,
     "new_title": result.get("new_title")
     }
-
-
 
 @app.post("/chat/ask-ai")
 def chat_ask_ai(req: dict):
