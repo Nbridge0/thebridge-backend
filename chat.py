@@ -108,6 +108,99 @@ BASE_SYSTEM_PROMPT = (
     "Maintain a confident, natural, human tone."
 )
 
+SPECIALIST_MATCH_CATALOG = [
+    {
+        "name": "iShine",
+        "category": "yacht detailing and surface protection",
+        "scope": (
+            "yacht detailing, polishing, ceramic coatings, paint care, "
+            "gelcoat care, glass protection, oxidation, surface restoration, "
+            "exterior finish and surface maintenance"
+        )
+    },
+    {
+        "name": "Yacht Trace",
+        "category": "tender tracking and towing safety",
+        "scope": (
+            "tender tracking, chase boat tracking, towing safety, night towing, "
+            "anti-theft monitoring, GPS tracking, bilge monitoring, battery "
+            "monitoring and tender security"
+        )
+    },
+    {
+        "name": "360 Yachting",
+        "category": "yacht agency and operational support",
+        "scope": (
+            "yacht agency services, port clearance, formalities, berthing, "
+            "provisioning, logistics, concierge, travel arrangements, itineraries, "
+            "spare parts and operational support"
+        )
+    },
+    {
+        "name": "MHG Insurance",
+        "category": "yacht and crew insurance",
+        "scope": (
+            "yacht insurance, crew health insurance, charter insurance, "
+            "hull and machinery insurance, P&I, liability, medical insurance, "
+            "travel insurance, marine trades insurance and insurance coverage"
+        )
+    },
+    {
+        "name": "Air Vortex",
+        "category": "marine pipework and corrosion remediation",
+        "scope": (
+            "pipe corrosion, internal pipe corrosion, pipe cleaning, "
+            "pipeline rehabilitation, epoxy lining, pipe leaks, pipe maintenance "
+            "and alternatives to pipe replacement"
+        )
+    },
+    {
+        "name": "Liiontek",
+        "category": "lithium-ion battery safety",
+        "scope": (
+            "lithium-ion batteries, battery monitoring, thermal runaway, "
+            "battery fire prevention, electric tender batteries, hybrid tender "
+            "batteries, charging safety and battery safety systems"
+        )
+    },
+    {
+        "name": "Numarqe",
+        "category": "yacht financial management",
+        "scope": (
+            "yacht payments, crew cards, supplier payments, multi-currency payments, "
+            "vessel expenses, owner reporting, APA tracking, financial controls "
+            "and refit finance"
+        )
+    },
+    {
+        "name": "MAR-IX",
+        "category": "marine HVAC and climate systems",
+        "scope": (
+            "marine HVAC, air conditioning, heating, ventilation, heat pumps, "
+            "climate control, air quality, cooling problems, heating problems, "
+            "HVAC faults and HVAC efficiency"
+        )
+    },
+    {
+        "name": "TDS",
+        "category": "teak decking",
+        "scope": (
+            "teak decks, teak decking, deck seams, caulking, teak repairs, "
+            "deck replacement, sanding, refinishing, teak maintenance "
+            "and marine teak flooring"
+        )
+    },
+    {
+        "name": "FarSounder",
+        "category": "forward-looking navigation sonar",
+        "scope": (
+            "forward-looking sonar, 3D sonar, transducers, underwater obstacle "
+            "detection, shallow-water navigation, grounding awareness, "
+            "sonar display integration and underwater navigation"
+        )
+    }
+]
+
 def add_contextual_helpful_ending(
     question: str,
     answer: str
@@ -1432,6 +1525,154 @@ def is_substantive_user_question(
         # Safe fallback:
         # don't falsely label ordinary conversation as missing knowledge.
         return False
+
+def get_specialist_match_panel(
+    question: str,
+    answer: str = ""
+) -> Optional[str]:
+    """
+    Semantically determines whether the user's question belongs
+    to one of TheBridge's configured specialist fields.
+
+    The specialist catalogue is fixed business configuration.
+    User-question matching is semantic and is NOT keyword-based.
+    """
+
+    clean_question = str(question or "").strip()
+    clean_answer = str(answer or "").strip()
+
+    if not clean_question:
+        return None
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are matching a user's issue to TheBridge's "
+                        "available human specialists.\n\n"
+
+                        "Understand the MEANING of the user's question. "
+                        "Do not perform simple keyword matching.\n\n"
+
+                        "Choose a specialist ONLY when the user's actual issue "
+                        "clearly falls within that specialist's supplied field "
+                        "and scope.\n\n"
+
+                        "Important rules:\n"
+                        "- Use only the supplied specialist catalogue.\n"
+                        "- Never invent another specialist.\n"
+                        "- Never invent another company.\n"
+                        "- Do not make a match from a vague or weak similarity.\n"
+                        "- The user does not need to use the exact terminology "
+                        "from the catalogue.\n"
+                        "- Infer the underlying issue semantically.\n"
+                        "- The answer may be used as supporting context, but the "
+                        "user's actual question is the primary signal.\n"
+                        "- If multiple specialists seem possible, select the one "
+                        "whose field most directly addresses the issue.\n"
+                        "- If there is no clear specialist match, return no match.\n\n"
+
+                        "Return ONLY valid JSON.\n\n"
+
+                        "For a clear match:\n"
+                        "{"
+                        "\"match\": true, "
+                        "\"specialist_name\": \"exact supplied specialist name\", "
+                        "\"category\": \"exact supplied category\""
+                        "}\n\n"
+
+                        "If there is no clear match:\n"
+                        "{\"match\": false}"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": clean_question,
+                        "answer": clean_answer,
+                        "specialists": SPECIALIST_MATCH_CATALOG
+                    })
+                }
+            ],
+            temperature=0
+        )
+
+        raw = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        raw = (
+            raw
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
+
+        json_match = re.search(
+            r"\{.*\}",
+            raw,
+            re.DOTALL
+        )
+
+        if not json_match:
+            return None
+
+        data = json.loads(
+            json_match.group(0)
+        )
+
+        if data.get("match") is not True:
+            return None
+
+        specialist_name = str(
+            data.get("specialist_name") or ""
+        ).strip()
+
+        category = str(
+            data.get("category") or ""
+        ).strip()
+
+        if not specialist_name or not category:
+            return None
+
+        # =================================================
+        # VERIFY THE MODEL SELECTED A REAL CONFIGURED ENTRY
+        # =================================================
+
+        matched_specialist = next(
+            (
+                specialist
+                for specialist in SPECIALIST_MATCH_CATALOG
+                if specialist["name"].lower()
+                == specialist_name.lower()
+            ),
+            None
+        )
+
+        if not matched_specialist:
+            return None
+
+        # Never trust/generated category text.
+        # Take the category directly from our configured record.
+        specialist_name = matched_specialist["name"]
+        category = matched_specialist["category"]
+
+        return (
+            f"This looks like a {category} issue. "
+            f"Need human judgement? Select {specialist_name} "
+            f"from the Ask a Specialist button and send your question."
+        )
+
+    except Exception as e:
+        print("SPECIALIST MATCH ERROR:", e)
+        return None
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 

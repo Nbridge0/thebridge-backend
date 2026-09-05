@@ -8,7 +8,8 @@ from chat import (
     ask_ai_only,
     save_message,
     track_click,
-    add_contextual_helpful_ending
+    add_contextual_helpful_ending,
+    get_specialist_match_panel
 )
 from supabase import create_client
 import os
@@ -32,21 +33,50 @@ from docx import Document
 
 def finish_chat_result(question: str, result: dict) -> dict:
     """
-    Adds one contextual next-step question only to substantive
-    AskTheBridge answers.
+    Final presentation layer for AskTheBridge answers.
 
-    General conversation, ordinary continuation, no-answer
-    responses and errors remain exactly as generated.
+    1. Adds a contextual useful next-step ending to substantive
+       AskTheBridge knowledge answers.
+
+    2. Adds an Ask a Specialist match panel when the question
+       clearly belongs to one of TheBridge's configured
+       specialist fields.
+
+    3. Leaves ordinary/general conversation untouched.
     """
 
     if not isinstance(result, dict):
         return result
 
-    source = str(result.get("source") or "").strip()
+    source = str(
+        result.get("source") or ""
+    ).strip()
 
-    # These are conversational/system outcomes, not substantive
-    # AskTheBridge knowledge answers.
+    # =====================================================
+    # HELPFUL ENDING RULES
+    # =====================================================
+
     skip_helpful_ending = source in {
+        "openai_general",
+        "openai_auto_fallback",
+        "continuation",
+        "no_answer",
+        "error",
+        "openai_only",
+    }
+
+    # =====================================================
+    # SPECIALIST PANEL RULES
+    #
+    # Do not recommend specialists during ordinary chat,
+    # continuation, errors or explicit Ask AI mode.
+    #
+    # openai_auto_fallback IS intentionally allowed:
+    # even when TheBridge had no verified answer, the
+    # question may clearly belong to one of our specialists.
+    # =====================================================
+
+    skip_specialist_match = source in {
         "openai_general",
         "continuation",
         "no_answer",
@@ -54,16 +84,16 @@ def finish_chat_result(question: str, result: dict) -> dict:
         "openai_only",
     }
 
-    if skip_helpful_ending:
-        return result
-
-    # -----------------------------------------------------
+    # =====================================================
     # MULTI-ANSWER RESULT
-    # -----------------------------------------------------
+    # =====================================================
+
     answers = result.get("answers")
 
     if isinstance(answers, list):
+
         for item in answers:
+
             if not isinstance(item, dict):
                 continue
 
@@ -74,25 +104,96 @@ def finish_chat_result(question: str, result: dict) -> dict:
             if not answer_text:
                 continue
 
-            item["answer"] = add_contextual_helpful_ending(
-                question,
-                answer_text
-            )
+            # ---------------------------------------------
+            # EXISTING CONTEXTUAL ENDING
+            # ---------------------------------------------
+
+            if not skip_helpful_ending:
+                answer_text = add_contextual_helpful_ending(
+                    question,
+                    answer_text
+                )
+
+            # ---------------------------------------------
+            # SPECIALIST MATCH PANEL
+            # ---------------------------------------------
+
+            if not skip_specialist_match:
+
+                specialist_panel = get_specialist_match_panel(
+                    question,
+                    answer_text
+                )
+
+                if specialist_panel:
+                    answer_text = (
+                        f"{answer_text}\n\n"
+                        f"{specialist_panel}"
+                    )
+
+                    actions = result.setdefault(
+                        "actions",
+                        []
+                    )
+
+                    if "ask_specialist" not in actions:
+                        actions.append(
+                            "ask_specialist"
+                        )
+
+            item["answer"] = answer_text
 
         return result
 
-    # -----------------------------------------------------
-    # SINGLE-ANSWER RESULT
-    # -----------------------------------------------------
+    # =====================================================
+    # SINGLE ANSWER RESULT
+    # =====================================================
+
     answer_text = str(
         result.get("answer") or ""
     ).strip()
 
-    if answer_text:
-        result["answer"] = add_contextual_helpful_ending(
+    if not answer_text:
+        return result
+
+    # -----------------------------------------------------
+    # EXISTING CONTEXTUAL ENDING
+    # -----------------------------------------------------
+
+    if not skip_helpful_ending:
+        answer_text = add_contextual_helpful_ending(
             question,
             answer_text
         )
+
+    # -----------------------------------------------------
+    # SPECIALIST MATCH PANEL
+    # -----------------------------------------------------
+
+    if not skip_specialist_match:
+
+        specialist_panel = get_specialist_match_panel(
+            question,
+            answer_text
+        )
+
+        if specialist_panel:
+            answer_text = (
+                f"{answer_text}\n\n"
+                f"{specialist_panel}"
+            )
+
+            actions = result.setdefault(
+                "actions",
+                []
+            )
+
+            if "ask_specialist" not in actions:
+                actions.append(
+                    "ask_specialist"
+                )
+
+    result["answer"] = answer_text
 
     return result
     
