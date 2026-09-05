@@ -336,12 +336,8 @@ def ask_openai(question: str) -> str:
             {"role": "user", "content": question},
         ],
     )
-    answer = r.choices[0].message.content.strip()
-
-    return add_contextual_helpful_ending(
-        question,
-        answer
-    )
+    
+    return r.choices[0].message.content.strip()
 
 def enrich_question(question: str) -> str:
     return question.lower()
@@ -650,7 +646,12 @@ Context:
         temperature=0
     )
 
-    return response.choices[0].message.content.strip()
+    answer = response.choices[0].message.content.strip()
+
+    return add_contextual_helpful_ending(
+        question,
+        answer
+    )
 
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
@@ -1433,13 +1434,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
             )
 
             return {
-                "answer": add_contextual_helpful_ending(
-                    message,
-                    response.choices[0].message.content.strip()
-                ),
+                "answer": response.choices[0].message.content.strip(),
                 "source": "continuation",
                 "actions": [],
-                "requires_auth": False, 
+                "requires_auth": False,
                 "new_title": None
             }
 
@@ -1733,10 +1731,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
         )
         answer = response.choices[0].message.content.strip()
         answer = enforce_yes_no(message, answer)
-        answer = add_contextual_helpful_ending(
-            message,
-            answer
-        )
+    
     except Exception as e:
         print("OPENAI ERROR:", e)
         answer = "⚠️ AI temporary error. Please try again."
