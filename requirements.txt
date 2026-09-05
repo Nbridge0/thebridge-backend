@@ -7,4 +7,6 @@ openai
 email-validator
 python-multipart
 
+pypdf
+python-docx
 
