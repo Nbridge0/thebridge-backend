@@ -9,9 +9,15 @@ from dotenv import load_dotenv, find_dotenv
 import secrets
 import requests
 from datetime import datetime, timedelta, timezone
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Form
 from openai import OpenAI
 
+import io
+import base64
+import mimetypes
+
+from pypdf import PdfReader
+from docx import Document
 # -------------------------
 # ENV
 # -------------------------
@@ -26,7 +32,107 @@ supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+# =========================================================
+# CHAT ATTACHMENT HELPERS
+# =========================================================
 
+MAX_CHAT_ATTACHMENT_BYTES = 15 * 1024 * 1024
+
+SUPPORTED_CHAT_DOCUMENT_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".md",
+    ".csv",
+}
+
+
+def get_file_extension(filename: str) -> str:
+    filename = str(filename or "").strip().lower()
+
+    if "." not in filename:
+        return ""
+
+    return "." + filename.rsplit(".", 1)[-1]
+
+
+def extract_chat_document_text(
+    filename: str,
+    content_type: str,
+    file_bytes: bytes
+) -> str:
+
+    extension = get_file_extension(filename)
+
+    # -----------------------------------------------------
+    # PDF
+    # -----------------------------------------------------
+    if extension == ".pdf":
+        reader = PdfReader(io.BytesIO(file_bytes))
+
+        pages = []
+
+        for page in reader.pages:
+            try:
+                text = page.extract_text() or ""
+            except Exception:
+                text = ""
+
+            text = text.strip()
+
+            if text:
+                pages.append(text)
+
+        return "\n\n".join(pages).strip()
+
+
+    # -----------------------------------------------------
+    # DOCX
+    # -----------------------------------------------------
+    if extension == ".docx":
+        document = Document(io.BytesIO(file_bytes))
+
+        parts = []
+
+        for paragraph in document.paragraphs:
+            text = (paragraph.text or "").strip()
+
+            if text:
+                parts.append(text)
+
+        for table in document.tables:
+            for row in table.rows:
+                values = [
+                    (cell.text or "").strip()
+                    for cell in row.cells
+                ]
+
+                row_text = " | ".join(
+                    value
+                    for value in values
+                    if value
+                )
+
+                if row_text:
+                    parts.append(row_text)
+
+        return "\n".join(parts).strip()
+
+
+    # -----------------------------------------------------
+    # PLAIN TEXT / MARKDOWN / CSV
+    # -----------------------------------------------------
+    if extension in {".txt", ".md", ".csv"}:
+        return file_bytes.decode(
+            "utf-8",
+            errors="ignore"
+        ).strip()
+
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unsupported document type: {extension or content_type}"
+    )
 
 
 FROM_EMAIL = os.getenv("FROM_EMAIL")
@@ -444,7 +550,229 @@ def help_send(req: HelpRequest):
 def health():
     return {"status": "ok"}
 
+@app.post("/chat/attachment")
+async def chat_attachment(
+    file: UploadFile = File(...),
+    message: str = Form(""),
+    chat_id: Optional[int] = Form(None),
+    user_role: str = Form("guest"),
+    user_email: Optional[str] = Form(None)
+):
+    """
+    Analyse a picture or document attached directly to a chat.
 
+    This route is intentionally separate from /chat/message so
+    the existing normal chat routing remains unchanged.
+    """
+
+    filename = (file.filename or "attachment").strip()
+    content_type = (
+        file.content_type
+        or mimetypes.guess_type(filename)[0]
+        or "application/octet-stream"
+    )
+
+    file_bytes = await file.read()
+
+    if not file_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty."
+        )
+
+    if len(file_bytes) > MAX_CHAT_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="The uploaded file is too large."
+        )
+
+    user_question = (message or "").strip()
+
+    if not user_question:
+        user_question = (
+            "Analyse this attachment and explain the relevant "
+            "information clearly."
+        )
+
+
+    # =====================================================
+    # CREATE CHAT IF REQUIRED
+    # =====================================================
+
+    effective_chat_id = chat_id
+
+    if effective_chat_id is None and user_email:
+
+        new_chat = (
+            supabase_admin
+            .table("user_chats")
+            .insert({
+                "user_email": user_email,
+                "title": user_question[:40] or filename[:40]
+            })
+            .execute()
+        )
+
+        if new_chat.data:
+            effective_chat_id = new_chat.data[0]["id"]
+
+
+    # =====================================================
+    # IMAGE
+    # =====================================================
+
+    if content_type.startswith("image/"):
+
+        encoded = base64.b64encode(
+            file_bytes
+        ).decode("utf-8")
+
+        data_url = (
+            f"data:{content_type};base64,{encoded}"
+        )
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are TheBridge AI. "
+                        "Analyse the user-provided image carefully. "
+                        "Answer the user's actual question about the image. "
+                        "Do not invent details that are not visible or "
+                        "reasonably supported by the image. "
+                        "If something cannot be determined from the image, "
+                        "say so clearly."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_question
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_url
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature=0
+        )
+
+        answer = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        source = "chat_image_attachment"
+
+
+    # =====================================================
+    # DOCUMENT
+    # =====================================================
+
+    else:
+
+        extracted_text = extract_chat_document_text(
+            filename=filename,
+            content_type=content_type,
+            file_bytes=file_bytes
+        )
+
+        if not extracted_text:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No readable text could be extracted "
+                    "from this document."
+                )
+            )
+
+        # Prevent a huge attachment from overflowing one request.
+        extracted_text = extracted_text[:120000]
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are TheBridge AI. "
+                        "Answer the user's question using the attached "
+                        "document content supplied below. "
+                        "Do not invent information that is not supported "
+                        "by the attachment. "
+                        "If the attachment does not contain the answer, "
+                        "say so clearly."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"User question:\n"
+                        f"{user_question}\n\n"
+                        f"Attached filename:\n"
+                        f"{filename}\n\n"
+                        f"Attached document content:\n"
+                        f"{extracted_text}"
+                    )
+                }
+            ],
+            temperature=0
+        )
+
+        answer = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        source = "chat_document_attachment"
+
+
+    # =====================================================
+    # SAVE TO CHAT HISTORY
+    # =====================================================
+
+    if effective_chat_id is not None:
+
+        save_message(
+            effective_chat_id,
+            "user",
+            f"{user_question}\n\n[Attachment: {filename}]",
+            "user_attachment",
+            user_email
+        )
+
+        save_message(
+            effective_chat_id,
+            "assistant",
+            answer,
+            source,
+            user_email
+        )
+
+
+    return {
+        "answer": answer,
+        "source": source,
+        "actions": [],
+        "requires_auth": False,
+        "chat_id": effective_chat_id,
+        "filename": filename
+    }
+    
 # -------------------------
 # CHAT
 # -------------------------
