@@ -1695,11 +1695,32 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     ]
 
     if any(k in user_norm for k in yachting_keywords):
+
+        try:
+            ai_answer = ask_ai_only(
+                message,
+                chat_id,
+                history
+            ) 
+
+            answer = (
+                "Oops, we don’t have the answer, but here is the AI answer:\n\n"
+                f"{ai_answer}"
+            )
+
+        except Exception as e:
+            print("AUTO AI FALLBACK ERROR:", e)
+
+            answer = (
+                "Oops, we don’t have the answer right now. "
+                "Please try again."
+            )
+
         return {
-            "answer": NO_ANSWER_FALLBACK,
-            "source": "no_answer",
-            "actions": ["ask_ai", "ask_specialist", "ask_ambassador"],
-            "requires_auth": user_role == "guest",
+            "answer": answer,
+            "source": "openai_auto_fallback",
+            "actions": ["ask_specialist", "ask_ambassador"],
+            "requires_auth": False,
             "new_title": None
         }
 
