@@ -25,6 +25,77 @@ import mimetypes
 
 from pypdf import PdfReader
 from docx import Document
+
+# =========================================================
+# FINAL ANSWER FINISHING
+# =========================================================
+
+def finish_chat_result(question: str, result: dict) -> dict:
+    """
+    Adds one contextual next-step question only to substantive
+    AskTheBridge answers.
+
+    General conversation, ordinary continuation, no-answer
+    responses and errors remain exactly as generated.
+    """
+
+    if not isinstance(result, dict):
+        return result
+
+    source = str(result.get("source") or "").strip()
+
+    # These are conversational/system outcomes, not substantive
+    # AskTheBridge knowledge answers.
+    skip_helpful_ending = source in {
+        "openai_general",
+        "continuation",
+        "no_answer",
+        "error",
+        "openai_only",
+    }
+
+    if skip_helpful_ending:
+        return result
+
+    # -----------------------------------------------------
+    # MULTI-ANSWER RESULT
+    # -----------------------------------------------------
+    answers = result.get("answers")
+
+    if isinstance(answers, list):
+        for item in answers:
+            if not isinstance(item, dict):
+                continue
+
+            answer_text = str(
+                item.get("answer") or ""
+            ).strip()
+
+            if not answer_text:
+                continue
+
+            item["answer"] = add_contextual_helpful_ending(
+                question,
+                answer_text
+            )
+
+        return result
+
+    # -----------------------------------------------------
+    # SINGLE-ANSWER RESULT
+    # -----------------------------------------------------
+    answer_text = str(
+        result.get("answer") or ""
+    ).strip()
+
+    if answer_text:
+        result["answer"] = add_contextual_helpful_ending(
+            question,
+            answer_text
+        )
+
+    return result
+    
 # -------------------------
 # ENV
 # -------------------------
@@ -834,7 +905,18 @@ def chat_message(req: ChatRequest):
         )
 
     try:
-        result = get_answer(req.message, req.user_role, req.chat_id, req.history)
+        result = get_answer(
+            req.message,
+            req.user_role,
+            req.chat_id,
+            req.history
+        )
+
+        result = finish_chat_result(
+            req.message,
+            result
+        )
+
     except Exception as e:
         print("AI ERROR:", e)
         return {

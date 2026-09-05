@@ -646,12 +646,7 @@ Context:
         temperature=0
     )
 
-    answer = response.choices[0].message.content.strip()
-
-    return add_contextual_helpful_ending(
-        question,
-        answer
-    )
+    return response.choices[0].message.content.strip()
 
 def is_troubleshooting_candidate(message: str) -> bool:
     msg = message.lower()
@@ -802,12 +797,7 @@ Partner context:
         temperature=0
     )
 
-    answer = response.choices[0].message.content.strip()
-
-    return add_contextual_helpful_ending(
-        question,
-        answer
-    )
+    return response.choices[0].message.content.strip()
 
 def generate_adaptive_partner_answer(question: str, partner_name: str, context_chunks: list) -> str:
     """
@@ -886,12 +876,7 @@ Partner context:
         temperature=0
     )
 
-    answer = response.choices[0].message.content.strip()
-
-    return add_contextual_helpful_ending(
-        question,
-        answer
-    )
+    return response.choices[0].message.content.strip()
     
 def get_best_triggered_partner_chunk(message: str, triggered_partners: list):
     """
