@@ -218,6 +218,31 @@ PROVIDER_RECOMMENDATION_CATALOG = [
     },
 ]
 
+def get_configured_provider_details(provider_name: str):
+    """
+    Returns verified configured provider information when the
+    current partner corresponds to one of our provider records.
+
+    This does not match user questions or keywords.
+    It only links an already-selected partner to its configured data.
+    """
+
+    clean_name = str(provider_name or "").strip().lower()
+
+    if not clean_name:
+        return None
+
+    for provider in PROVIDER_RECOMMENDATION_CATALOG:
+
+        configured_name = str(
+            provider.get("name") or ""
+        ).strip().lower()
+
+        if configured_name == clean_name:
+            return provider
+
+    return None
+
 def add_contextual_helpful_ending(
     question: str,
     answer: str
@@ -921,6 +946,39 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
 
     context = "\n\n---\n\n".join(context_chunks[:3])
 
+    configured_provider = get_configured_provider_details(
+        partner_name
+    )
+
+    provider_details = ""
+
+    if configured_provider:
+
+        verified_details = []
+
+        website = str(
+            configured_provider.get("website") or ""
+        ).strip()
+
+        email = str(
+            configured_provider.get("email") or ""
+        ).strip()
+
+        if website:
+            verified_details.append(
+                f"Website: {website}"
+            )
+
+        if email:
+            verified_details.append(
+                f"Email: {email}"
+            )
+
+        if verified_details:
+            provider_details = "\n".join(
+                verified_details
+            )
+
     messages = [
         {
             "role": "system",
@@ -959,11 +1017,28 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
                 "- Answer in the same language as the user's question when possible.\n\n"
 
                 "CONTACT DETAILS RULE:\n"
-                "- Include website, email, phone, or other contact details ONLY when they are useful for answering the user's actual question.\n"
-                "- Include contact details when the user asks how to contact, reach, enquire with, apply through, buy from, or get in touch with the partner.\n"
-                "- Contact details may also be included when the user explicitly asks for a provider/recommendation and the details are useful for taking the next step.\n"
-                "- For normal informational questions about a partner, do NOT add contact details unnecessarily.\n"
-                "- Only use contact details that exist in the supplied partner context. Never invent them.\n\n"
+                "- Verified provider contact details may be supplied separately below.\n"
+                "- Treat those verified details as authoritative provider information.\n"
+                "- Never claim that contact details are unavailable when verified "
+                "contact details have been supplied.\n"
+                "- If the user asks for contact details, how to contact the provider, "
+                "how to reach them, or otherwise clearly needs to contact them, "
+                "include the relevant verified contact details directly.\n"
+                "- If your answer recommends the provider as the company/provider "
+                "the user should use for their request, include the available "
+                "verified website and email at the END of the answer so the "
+                "recommendation is actionable.\n"
+                "- For ordinary informational questions where you are merely "
+                "explaining the company, service, product or topic and are NOT "
+                "actually recommending the provider, do not add contact details "
+                "unless they are useful for the user's request.\n"
+                "- Do not repeat contact details already stated in the answer.\n"
+                "- Never invent contact details.\n\n"
+
+                f"The relevant partner is: {partner_name}.\n\n"
+
+                "VERIFIED PROVIDER DETAILS:\n"
+                f"{provider_details if provider_details else 'NONE'}"
 
                 f"The relevant partner is: {partner_name}."
             )
@@ -974,8 +1049,14 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
 User question:
 {question}
 
+Partner:
+{partner_name}
+
 Partner context:
 {context}
+
+Verified configured provider details:
+{provider_details if provider_details else "NONE"}
 """
         }
     ]
@@ -1746,9 +1827,18 @@ def get_provider_recommendation_panel(
                         "- Do not add a commercial recommendation to every answer.\n"
                         "- If the user is simply asking what a company, product, "
                         "system or subject is, normally do not append a provider.\n"
-                        "- If the existing assistant answer already contains the "
-                        "same provider recommendation or its contact details, "
-                        "return no recommendation so it is not duplicated.\n"
+                        "- Inspect the existing assistant answer before making "
+                        "any recommendation.\n"
+                        "- If the existing answer already recommends the same "
+                        "provider, return no recommendation.\n"
+                        "- If the existing answer already identifies that provider "
+                        "as the company/provider the user should use, return no "
+                        "recommendation.\n"
+                        "- If the existing answer already contains that provider's "
+                        "website, email or other configured contact details, "
+                        "return no recommendation.\n"
+                        "- Never append a second recommendation for a provider "
+                        "that the answer already recommends.\n"
                         "- The provider's scope must directly fit the user's "
                         "actual requirement.\n"
                         "- Never invent a provider.\n"
