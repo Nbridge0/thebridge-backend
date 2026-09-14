@@ -10,7 +10,8 @@ from chat import (
     track_click,
     add_contextual_helpful_ending,
     get_specialist_match_panel,
-    get_provider_recommendation_panel
+    get_provider_recommendation_panel,
+    get_provider_comparison_panel
 )
 from supabase import create_client
 import os
@@ -83,6 +84,14 @@ def finish_chat_result(question: str, result: dict) -> dict:
         "openai_only",
     }
 
+
+    skip_provider_comparison = source in {
+        "continuation",
+        "no_answer",
+        "error",
+        "openai_only",
+    }
+
     # =====================================================
     # MULTI-ANSWER RESULT
     # =====================================================
@@ -92,6 +101,7 @@ def finish_chat_result(question: str, result: dict) -> dict:
     if isinstance(answers, list):
 
         provider_panel_added = False
+        comparison_panel_added = False
 
         for item in answers:
 
@@ -160,6 +170,24 @@ def finish_chat_result(question: str, result: dict) -> dict:
 
                     provider_panel_added = True
 
+            if (
+                not skip_provider_comparison
+                and not comparison_panel_added
+            ):
+
+                comparison_panel = get_provider_comparison_panel(
+                    question,
+                    answer_text
+                )
+
+                if comparison_panel:
+                    answer_text = (
+                        f"{answer_text}\n\n"
+                        f"{comparison_panel}"
+                    )
+
+                    comparison_panel_added = True
+
             item["answer"] = answer_text
 
         return result
@@ -223,6 +251,20 @@ def finish_chat_result(question: str, result: dict) -> dict:
             answer_text = (
                 f"{answer_text}\n\n"
                 f"{provider_panel}"
+            )
+
+
+    if not skip_provider_comparison:
+
+        comparison_panel = get_provider_comparison_panel(
+            question,
+            answer_text
+        )
+
+        if comparison_panel:
+            answer_text = (
+                f"{answer_text}\n\n"
+                f"{comparison_panel}"
             )
 
     result["answer"] = answer_text

@@ -216,7 +216,41 @@ PROVIDER_RECOMMENDATION_CATALOG = [
         "website": "https://eyostenders.com",
         "email": "info@eyostenders.com",
     },
+    {
+        "name": "Numarqe",
+        "category": "yacht payments, foreign exchange and card-based financial management",
+        "scope": (
+            "foreign exchange, FX payments, FX transfers, currency conversion, "
+            "multi-currency payments, international payments, supplier payments, "
+            "yacht payments, crew payments, payment cards, credit cards, "
+            "corporate cards, crew cards, vessel expenses, financial controls, "
+            "owner reporting, APA tracking and refit finance"
+        ),
+    },
 ]
+
+
+PROVIDER_COMPARISON_CATALOG = [
+    {
+        "provider_name": "Numarqe",
+        "compared_with": "American Express",
+        "aliases": [
+            "American Express",
+            "Amex",
+            "AMEX",
+        ],
+        "url": "https://www.numarqe.com/comparisons/numarqe-vs-amex",
+    },
+    {
+        "provider_name": "Numarqe",
+        "compared_with": "Barclaycard",
+        "aliases": [
+            "Barclaycard",
+        ],
+        "url": "https://www.numarqe.com/comparisons/numarqe-vs-barclaycard",
+    },
+]
+
 
 def get_configured_provider_details(provider_name: str):
     """
@@ -1809,6 +1843,16 @@ def get_provider_recommendation_panel(
                         "provider is a clear and directly useful fit for what "
                         "the user is actually trying to do.\n\n"
 
+                        "When a configured provider directly offers the service "
+                        "the user needs, treat that as a strong recommendation "
+                        "candidate even if the user did not explicitly ask "
+                        "for a company recommendation.\n"
+                        "For example, a user may be asking how to accomplish "
+                        "a financial, operational, technical or purchasing task "
+                        "rather than literally asking 'who do you recommend'. "
+                        "If one configured provider directly solves that actual "
+                        "need, it may still be genuinely useful to recommend it.\n\n"
+
                         "Examples of situations where a recommendation may be "
                         "appropriate include when the user genuinely needs a "
                         "provider, supplier, professional service, sourcing help, "
@@ -1984,6 +2028,167 @@ def get_provider_recommendation_panel(
 
     except Exception as e:
         print("PROVIDER RECOMMENDATION ERROR:", e)
+        return None
+
+def get_provider_comparison_panel(
+    question: str,
+    answer: str = ""
+) -> Optional[str]:
+    """
+    Determines whether the user's current message refers to one of
+    the configured comparison entities.
+
+    User questions are not hard-coded.
+
+    The comparison catalogue contains only business configuration:
+    provider, competitor aliases and the verified comparison URL.
+    """
+
+    clean_question = str(question or "").strip()
+    clean_answer = str(answer or "").strip()
+
+    if not clean_question:
+        return None
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Determine whether the user's CURRENT message refers "
+                        "to one of the configured comparison entities.\n\n"
+
+                        "Understand company-name variations, abbreviations and "
+                        "normal conversational references using the supplied "
+                        "configuration.\n\n"
+
+                        "STRICT RULES:\n"
+                        "- Do not invent a company.\n"
+                        "- Do not invent a comparison.\n"
+                        "- Use only the supplied comparison catalogue.\n"
+                        "- Match the actual entity being discussed, not merely "
+                        "a loosely related financial topic.\n"
+                        "- If the current answer already contains the exact "
+                        "configured comparison URL, return no match so the "
+                        "link is not duplicated.\n"
+                        "- If no configured comparison entity is genuinely "
+                        "mentioned or referred to, return no match.\n\n"
+
+                        "Return ONLY valid JSON.\n\n"
+
+                        "For a match:\n"
+                        "{"
+                        "\"match\": true, "
+                        "\"provider_name\": \"exact configured provider name\", "
+                        "\"compared_with\": \"exact configured compared_with value\""
+                        "}\n\n"
+
+                        "Otherwise:\n"
+                        "{\"match\": false}"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": clean_question,
+                        "current_answer": clean_answer,
+                        "comparisons": PROVIDER_COMPARISON_CATALOG
+                    })
+                }
+            ],
+            temperature=0
+        )
+
+        raw = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        raw = (
+            raw
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
+
+        json_match = re.search(
+            r"\{.*\}",
+            raw,
+            re.DOTALL
+        )
+
+        if not json_match:
+            return None
+
+        data = json.loads(
+            json_match.group(0)
+        )
+
+        if data.get("match") is not True:
+            return None
+
+        provider_name = str(
+            data.get("provider_name") or ""
+        ).strip()
+
+        compared_with = str(
+            data.get("compared_with") or ""
+        ).strip()
+
+        if not provider_name or not compared_with:
+            return None
+
+        # =================================================
+        # VERIFY AGAINST REAL CONFIGURATION
+        # =================================================
+
+        comparison = next(
+            (
+                item
+                for item in PROVIDER_COMPARISON_CATALOG
+                if (
+                    str(item.get("provider_name") or "").lower()
+                    == provider_name.lower()
+                    and
+                    str(item.get("compared_with") or "").lower()
+                    == compared_with.lower()
+                )
+            ),
+            None
+        )
+
+        if not comparison:
+            return None
+
+        url = str(
+            comparison.get("url") or ""
+        ).strip()
+
+        if not url:
+            return None
+
+        # Avoid duplicate URLs if another answer layer
+        # already included the same comparison.
+        if url.lower() in clean_answer.lower():
+            return None
+
+        verified_provider = comparison["provider_name"]
+        verified_compared_with = comparison["compared_with"]
+
+        return (
+            f"If you're considering {verified_compared_with}, "
+            f"you can also see how it compares with "
+            f"{verified_provider} here:\n"
+            f"{url}"
+        )
+
+    except Exception as e:
+        print("PROVIDER COMPARISON ERROR:", e)
         return None
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
