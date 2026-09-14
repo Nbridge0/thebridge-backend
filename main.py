@@ -33,6 +33,30 @@ from docx import Document
 # FINAL ANSWER FINISHING
 # =========================================================
 
+def text_already_contains(
+    full_text: str,
+    candidate_text: str
+) -> bool:
+    """
+    Generic duplicate-content check.
+
+    Ignores differences in whitespace and capitalisation.
+    Does not contain any question/topic/provider hard-coding.
+    """
+
+    full_normalised = " ".join(
+        str(full_text or "").lower().split()
+    )
+
+    candidate_normalised = " ".join(
+        str(candidate_text or "").lower().split()
+    )
+
+    if not candidate_normalised:
+        return False
+
+    return candidate_normalised in full_normalised
+
 def finish_chat_result(question: str, result: dict) -> dict:
     """
     Final presentation layer for AskTheBridge answers.
@@ -137,10 +161,15 @@ def finish_chat_result(question: str, result: dict) -> dict:
                 )
 
                 if specialist_panel:
-                    answer_text = (
-                        f"{answer_text}\n\n"
-                        f"{specialist_panel}"
-                    )
+
+                    if not text_already_contains(
+                        answer_text,
+                        specialist_panel
+                    ):
+                        answer_text = (
+                            f"{answer_text}\n\n"
+                            f"{specialist_panel}"
+                        )
 
                     actions = result.setdefault(
                         "actions",
@@ -225,10 +254,15 @@ def finish_chat_result(question: str, result: dict) -> dict:
         )
 
         if specialist_panel:
-            answer_text = (
-                f"{answer_text}\n\n"
-                f"{specialist_panel}"
-            )
+
+            if not text_already_contains(
+                answer_text,
+                specialist_panel
+            ):
+                answer_text = (
+                    f"{answer_text}\n\n"
+                    f"{specialist_panel}"
+                )
 
             actions = result.setdefault(
                 "actions",
