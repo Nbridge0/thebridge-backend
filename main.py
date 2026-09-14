@@ -9,7 +9,8 @@ from chat import (
     save_message,
     track_click,
     add_contextual_helpful_ending,
-    get_specialist_match_panel
+    get_specialist_match_panel,
+    get_provider_recommendation_panel
 )
 from supabase import create_client
 import os
@@ -65,18 +66,16 @@ def finish_chat_result(question: str, result: dict) -> dict:
         "openai_only",
     }
 
-    # =====================================================
-    # SPECIALIST PANEL RULES
-    #
-    # Do not recommend specialists during ordinary chat,
-    # continuation, errors or explicit Ask AI mode.
-    #
-    # openai_auto_fallback IS intentionally allowed:
-    # even when TheBridge had no verified answer, the
-    # question may clearly belong to one of our specialists.
-    # =====================================================
 
     skip_specialist_match = source in {
+        "openai_general",
+        "continuation",
+        "no_answer",
+        "error",
+        "openai_only",
+    }
+
+    skip_provider_recommendation = source in {
         "openai_general",
         "continuation",
         "no_answer",
@@ -91,6 +90,8 @@ def finish_chat_result(question: str, result: dict) -> dict:
     answers = result.get("answers")
 
     if isinstance(answers, list):
+
+        provider_panel_added = False
 
         for item in answers:
 
@@ -140,6 +141,24 @@ def finish_chat_result(question: str, result: dict) -> dict:
                         actions.append(
                             "ask_specialist"
                         )
+
+            if (
+                not skip_provider_recommendation
+                and not provider_panel_added
+            ):
+
+                provider_panel = get_provider_recommendation_panel(
+                    question,
+                    answer_text
+                )
+
+                if provider_panel:
+                    answer_text = (
+                        f"{answer_text}\n\n"
+                        f"{provider_panel}"
+                    )
+
+                    provider_panel_added = True
 
             item["answer"] = answer_text
 
@@ -192,6 +211,19 @@ def finish_chat_result(question: str, result: dict) -> dict:
                 actions.append(
                     "ask_specialist"
                 )
+
+    if not skip_provider_recommendation:
+
+        provider_panel = get_provider_recommendation_panel(
+            question,
+            answer_text
+        )
+
+        if provider_panel:
+            answer_text = (
+                f"{answer_text}\n\n"
+                f"{provider_panel}"
+            )
 
     result["answer"] = answer_text
 

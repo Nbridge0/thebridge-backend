@@ -201,6 +201,23 @@ SPECIALIST_MATCH_CATALOG = [
     }
 ]
 
+
+PROVIDER_RECOMMENDATION_CATALOG = [
+    {
+        "name": "EYOS Tenders & Toys",
+        "category": "superyacht tenders, water toys and related yacht support",
+        "scope": (
+            "superyacht tender sourcing, tender consultancy, custom tenders, "
+            "tender refits, tender sales, water toys, yacht toys, inflatables, "
+            "inflatable platforms, tender brokerage, storage, warehousing, "
+            "seasonal equipment rotation, yacht equipment logistics and "
+            "related tender and toy support"
+        ),
+        "website": "https://eyostenders.com",
+        "email": "info@eyostenders.com",
+    },
+]
+
 def add_contextual_helpful_ending(
     question: str,
     answer: str
@@ -1672,6 +1689,211 @@ def get_specialist_match_panel(
 
     except Exception as e:
         print("SPECIALIST MATCH ERROR:", e)
+        return None
+
+def get_provider_recommendation_panel(
+    question: str,
+    answer: str = ""
+) -> Optional[str]:
+    """
+    Semantically decides whether a configured provider would be
+    genuinely useful for the user's actual request.
+
+    No user question, phrase, keyword, or trigger is hard-coded.
+
+    The configured provider itself is business configuration only.
+    """
+
+    clean_question = str(question or "").strip()
+    clean_answer = str(answer or "").strip()
+
+    if not clean_question:
+        return None
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You decide whether the user's CURRENT request would "
+                        "genuinely benefit from recommending one of TheBridge's "
+                        "configured service providers.\n\n"
+
+                        "Understand the MEANING and INTENT of the user's request. "
+                        "Do NOT perform keyword matching.\n\n"
+
+                        "A provider recommendation should be made ONLY when the "
+                        "provider is a clear and directly useful fit for what "
+                        "the user is actually trying to do.\n\n"
+
+                        "Examples of situations where a recommendation may be "
+                        "appropriate include when the user genuinely needs a "
+                        "provider, supplier, professional service, sourcing help, "
+                        "purchasing help, a quotation, specialist commercial help, "
+                        "or a practical company they can approach to carry out "
+                        "the requirement.\n\n"
+
+                        "However, those are intent examples only. "
+                        "Do not match them as fixed phrases or keywords.\n\n"
+
+                        "STRICT RULES:\n"
+                        "- Do not recommend a provider merely because the topic "
+                        "is loosely related to its industry.\n"
+                        "- Do not recommend a provider during ordinary factual "
+                        "or educational discussion when a provider is not needed.\n"
+                        "- Do not add a commercial recommendation to every answer.\n"
+                        "- If the user is simply asking what a company, product, "
+                        "system or subject is, normally do not append a provider.\n"
+                        "- If the existing assistant answer already contains the "
+                        "same provider recommendation or its contact details, "
+                        "return no recommendation so it is not duplicated.\n"
+                        "- The provider's scope must directly fit the user's "
+                        "actual requirement.\n"
+                        "- Never invent a provider.\n"
+                        "- Never invent services.\n"
+                        "- Never invent contact details.\n"
+                        "- Use only the supplied provider catalogue.\n"
+                        "- If the fit is uncertain, weak or merely adjacent, "
+                        "return no recommendation.\n\n"
+
+                        "CONTACT DETAILS:\n"
+                        "- include_contact should be true only when giving the "
+                        "website/email would be genuinely useful for the next step.\n"
+                        "- This includes situations where the user needs to "
+                        "approach, source from, enquire with, obtain services from, "
+                        "or otherwise act on the recommendation.\n"
+                        "- It may also be true when the user directly wants the "
+                        "provider's contact information.\n"
+                        "- For a recommendation where contact details add no "
+                        "practical value, it may be false.\n\n"
+
+                        "Return ONLY valid JSON.\n\n"
+
+                        "For a clear provider recommendation:\n"
+                        "{"
+                        "\"match\": true, "
+                        "\"provider_name\": \"exact supplied provider name\", "
+                        "\"include_contact\": true"
+                        "}\n\n"
+
+                        "or:\n"
+                        "{"
+                        "\"match\": true, "
+                        "\"provider_name\": \"exact supplied provider name\", "
+                        "\"include_contact\": false"
+                        "}\n\n"
+
+                        "If no provider should be recommended:\n"
+                        "{\"match\": false}"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": clean_question,
+                        "current_answer": clean_answer,
+                        "providers": PROVIDER_RECOMMENDATION_CATALOG
+                    })
+                }
+            ],
+            temperature=0
+        )
+
+        raw = (
+            response
+            .choices[0]
+            .message
+            .content
+            .strip()
+        )
+
+        raw = (
+            raw
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
+
+        json_match = re.search(
+            r"\{.*\}",
+            raw,
+            re.DOTALL
+        )
+
+        if not json_match:
+            return None
+
+        data = json.loads(
+            json_match.group(0)
+        )
+
+        if data.get("match") is not True:
+            return None
+
+        provider_name = str(
+            data.get("provider_name") or ""
+        ).strip()
+
+        if not provider_name:
+            return None
+
+        # =================================================
+        # VERIFY THE MODEL SELECTED A REAL CONFIGURED PROVIDER
+        # =================================================
+
+        matched_provider = next(
+            (
+                provider
+                for provider in PROVIDER_RECOMMENDATION_CATALOG
+                if provider["name"].lower()
+                == provider_name.lower()
+            ),
+            None
+        )
+
+        if not matched_provider:
+            return None
+
+        # Never trust generated provider/contact information.
+        # Everything displayed comes from our configured record.
+
+        provider_name = matched_provider["name"]
+        website = matched_provider.get("website")
+        email = matched_provider.get("email")
+
+        include_contact = (
+            data.get("include_contact") is True
+        )
+
+        if include_contact:
+            contact_parts = []
+
+            if website:
+                contact_parts.append(
+                    f"Website: {website}"
+                )
+
+            if email:
+                contact_parts.append(
+                    f"Email: {email}"
+                )
+
+            if contact_parts:
+                return (
+                    f"For this requirement, {provider_name} "
+                    f"may be worth contacting.\n"
+                    + "\n".join(contact_parts)
+                )
+
+        return (
+            f"For this requirement, {provider_name} "
+            f"may be worth considering."
+        )
+
+    except Exception as e:
+        print("PROVIDER RECOMMENDATION ERROR:", e)
         return None
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
