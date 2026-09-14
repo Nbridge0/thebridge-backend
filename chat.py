@@ -2035,13 +2035,13 @@ def get_provider_comparison_panel(
     answer: str = ""
 ) -> Optional[str]:
     """
-    Determines whether the user's current message refers to one of
-    the configured comparison entities.
+    Adds a configured comparison link ONLY when the user's
+    CURRENT message explicitly mentions one of the configured
+    comparison entities or aliases.
 
-    User questions are not hard-coded.
+    No user questions are hard-coded.
 
-    The comparison catalogue contains only business configuration:
-    provider, competitor aliases and the verified comparison URL.
+    Company names, aliases and URLs are business configuration.
     """
 
     clean_question = str(question or "").strip()
@@ -2050,146 +2050,92 @@ def get_provider_comparison_panel(
     if not clean_question:
         return None
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Determine whether the user's CURRENT message refers "
-                        "to one of the configured comparison entities.\n\n"
+    # =====================================================
+    # NORMALISE ONLY FOR ENTITY / ALIAS RECOGNITION
+    # =====================================================
 
-                        "Understand company-name variations, abbreviations and "
-                        "normal conversational references using the supplied "
-                        "configuration.\n\n"
+    question_normalised = normalize(
+        clean_question
+    )
 
-                        "STRICT RULES:\n"
-                        "- Do not invent a company.\n"
-                        "- Do not invent a comparison.\n"
-                        "- Use only the supplied comparison catalogue.\n"
-                        "- Match the actual entity being discussed, not merely "
-                        "a loosely related financial topic.\n"
-                        "- If the current answer already contains the exact "
-                        "configured comparison URL, return no match so the "
-                        "link is not duplicated.\n"
-                        "- If no configured comparison entity is genuinely "
-                        "mentioned or referred to, return no match.\n\n"
+    for comparison in PROVIDER_COMPARISON_CATALOG:
 
-                        "Return ONLY valid JSON.\n\n"
+        aliases = comparison.get("aliases") or []
 
-                        "For a match:\n"
-                        "{"
-                        "\"match\": true, "
-                        "\"provider_name\": \"exact configured provider name\", "
-                        "\"compared_with\": \"exact configured compared_with value\""
-                        "}\n\n"
+        entity_mentioned = False
 
-                        "Otherwise:\n"
-                        "{\"match\": false}"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps({
-                        "question": clean_question,
-                        "current_answer": clean_answer,
-                        "comparisons": PROVIDER_COMPARISON_CATALOG
-                    })
-                }
-            ],
-            temperature=0
-        )
+        for alias in aliases:
 
-        raw = (
-            response
-            .choices[0]
-            .message
-            .content
-            .strip()
-        )
+            alias_normalised = normalize(
+                str(alias or "")
+            )
 
-        raw = (
-            raw
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
+            if not alias_normalised:
+                continue
 
-        json_match = re.search(
-            r"\{.*\}",
-            raw,
-            re.DOTALL
-        )
+            # ---------------------------------------------
+            # Exact word / phrase matching.
+            #
+            # This checks ONLY configured entity aliases.
+            # It does NOT match user question types,
+            # intents, financial words or topics.
+            # ---------------------------------------------
 
-        if not json_match:
-            return None
+            pattern = (
+                r"(?<!\w)"
+                + re.escape(alias_normalised)
+                + r"(?!\w)"
+            )
 
-        data = json.loads(
-            json_match.group(0)
-        )
+            if re.search(
+                pattern,
+                question_normalised,
+                re.IGNORECASE
+            ):
+                entity_mentioned = True
+                break
 
-        if data.get("match") is not True:
-            return None
+        # The current user did NOT mention this configured
+        # comparison entity, so completely ignore it.
+        if not entity_mentioned:
+            continue
 
         provider_name = str(
-            data.get("provider_name") or ""
+            comparison.get("provider_name") or ""
         ).strip()
 
         compared_with = str(
-            data.get("compared_with") or ""
+            comparison.get("compared_with") or ""
         ).strip()
-
-        if not provider_name or not compared_with:
-            return None
-
-        # =================================================
-        # VERIFY AGAINST REAL CONFIGURATION
-        # =================================================
-
-        comparison = next(
-            (
-                item
-                for item in PROVIDER_COMPARISON_CATALOG
-                if (
-                    str(item.get("provider_name") or "").lower()
-                    == provider_name.lower()
-                    and
-                    str(item.get("compared_with") or "").lower()
-                    == compared_with.lower()
-                )
-            ),
-            None
-        )
-
-        if not comparison:
-            return None
 
         url = str(
             comparison.get("url") or ""
         ).strip()
 
-        if not url:
-            return None
+        if not provider_name:
+            continue
 
-        # Avoid duplicate URLs if another answer layer
-        # already included the same comparison.
+        if not compared_with:
+            continue
+
+        if not url:
+            continue
+
+        # ---------------------------------------------
+        # Never duplicate an existing comparison link
+        # ---------------------------------------------
+
         if url.lower() in clean_answer.lower():
             return None
 
-        verified_provider = comparison["provider_name"]
-        verified_compared_with = comparison["compared_with"]
-
         return (
-            f"If you're considering {verified_compared_with}, "
+            f"If you're considering {compared_with}, "
             f"you can also see how it compares with "
-            f"{verified_provider} here:\n"
+            f"{provider_name} here:\n"
             f"{url}"
         )
 
-    except Exception as e:
-        print("PROVIDER COMPARISON ERROR:", e)
-        return None
+    return None
 
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
