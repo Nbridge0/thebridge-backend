@@ -442,15 +442,28 @@ def get_user_name_by_email(email: str) -> str:
 
 
 def get_user_by_email(email: str):
+    """Find an Auth user across every Supabase Auth pagination page.
+
+    Never silently treat an API failure as 'user does not exist'.
+    """
     email = email.lower().strip()
+    page = 1
+    page_size = 1000
 
-    users = supabase_admin.auth.admin.list_users()
+    while True:
+        users = supabase_admin.auth.admin.list_users(
+            page=page,
+            per_page=page_size
+        )
 
-    for u in users:
-        if u.email and u.email.lower().strip() == email:
-            return u
+        for user in users:
+            if (user.email or "").lower().strip() == email:
+                return user
 
-    return None
+        if len(users) < page_size:
+            return None
+
+        page += 1
 
 
 def profile_exists(email: str) -> bool:
@@ -1551,17 +1564,23 @@ def verify(req: VerifyRequest):
 def login(req: LoginRequest):
     email = req.email.lower().strip()
 
-    if not profile_exists(email):
-        raise HTTPException(
-            status_code=401,
-            detail="Account not found. Please create an account again."
-        )
-
     try:
         auth = supabase.auth.sign_in_with_password({
             "email": email,
             "password": req.password
         })
+
+        if not auth.user:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        if not profile_exists(email):
+            user_metadata = getattr(auth.user, "user_metadata", None) or {}
+            supabase_admin.table("user_profiles").upsert({
+                "id": auth.user.id,
+                "email": email,
+                "name": user_metadata.get("name") or email.split("@")[0],
+                "newsletter": False
+            }).execute()
 
         track_user_signin(email)
 
@@ -1684,7 +1703,7 @@ def reset_request(req: ResetRequest):
     if not user:
         raise HTTPException(
             status_code=404,
-            detail="Email not registered with us. Please create an account."
+            detail="Unable to find this account. Check the email address or contact support."
         )
 
     code = secrets.token_hex(3)
