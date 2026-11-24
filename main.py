@@ -133,6 +133,13 @@ def finish_chat_result(question: str, result: dict) -> dict:
         answer = str(item.get("answer") or "").strip()
         if not answer:
             continue
+        fast_panels = item.pop("_fast_panels", None)
+        if fast_panels is not None:
+            from concurrent.futures import Future
+            job = Future()
+            job.set_result((answer, *fast_panels))
+            jobs.append((item, job))
+            continue
         job = _FINISH_POOL.submit(combined_answer_finishing, question, answer,
                                   not skip_helpful_ending, not skip_specialist_match,
                                   not skip_provider_recommendation)
