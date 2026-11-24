@@ -1,10 +1,14 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import StreamingResponse
+from queue import Queue, Empty
+import json
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from chat import (
     get_answer,
     IDENTITY_RULES,
+    ANSWER_STREAM,
     combined_answer_finishing,
     send_help_request,
     ask_ai_only,
@@ -988,6 +992,12 @@ def chat_message(req: ChatRequest):
         )
 
         retrieved = time.perf_counter()
+        publish = ANSWER_STREAM.get()
+        if publish:
+            if result.get("answers"):
+                publish(result["answers"][0].get("answer") or "")
+            elif result.get("answer"):
+                publish(result["answer"])
         result = finish_chat_result(
             req.message,
             result
@@ -1089,6 +1099,58 @@ def chat_ask_ai(req: dict):
         "answer": answer,
         "source": "openai_only"
     }
+
+
+# Streaming routes are additive; legacy JSON clients keep working.
+_STREAM_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="bridge-stream")
+
+
+def _stream_response(handler, request):
+    events = Queue()
+    started = time.perf_counter()
+    last = [None]
+    def publish(text):
+        if not text or text == last[0]:
+            return
+        if last[0] is None:
+            print(f"CHAT FIRST TEXT {time.perf_counter()-started:.2f}s")
+        last[0] = text
+        events.put({"type": "text", "text": text})
+    def worker():
+        token = ANSWER_STREAM.set(publish)
+        try:
+            result = handler(request)
+            events.put({"type": "final", "result": result})
+        except Exception as exc:
+            print("CHAT STREAM ERROR", type(exc).__name__)
+            events.put({"type": "error", "message": "Temporary error. Please try again."})
+        finally:
+            ANSWER_STREAM.reset(token)
+            events.put(None)
+    def generate():
+        _STREAM_POOL.submit(worker)
+        yield json.dumps({"type": "start"}) + "\n"
+        while True:
+            try:
+                event = events.get(timeout=10)
+            except Empty:
+                yield json.dumps({"type": "ping"}) + "\n"
+                continue
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=True) + "\n"
+    return StreamingResponse(generate(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+@app.post("/chat/message/stream")
+def chat_message_stream(req: ChatRequest):
+    return _stream_response(chat_message, req)
+
+
+@app.post("/chat/ask-ai/stream")
+def chat_ask_ai_stream(req: dict):
+    return _stream_response(chat_ask_ai, req)
 
 # -------------------------
 # AUTH
