@@ -4,6 +4,8 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from chat import (
     get_answer,
+    IDENTITY_RULES,
+    combined_answer_finishing,
     send_help_request,
     ask_ai_only,
     save_message,
@@ -131,20 +133,19 @@ def finish_chat_result(question: str, result: dict) -> dict:
         answer = str(item.get("answer") or "").strip()
         if not answer:
             continue
-        ending = None if skip_helpful_ending else _FINISH_POOL.submit(add_contextual_helpful_ending, question, answer)
-        specialist = None if skip_specialist_match else _FINISH_POOL.submit(get_specialist_match_panel, question, answer)
-        provider = None if skip_provider_recommendation else _FINISH_POOL.submit(get_provider_recommendation_panel, question, answer)
-        jobs.append((item, answer, ending, specialist, provider))
-    for item, original, ending, specialist, provider in jobs:
-        answer = ending.result() if ending else original
-        panel = specialist.result() if specialist else None
+        job = _FINISH_POOL.submit(combined_answer_finishing, question, answer,
+                                  not skip_helpful_ending, not skip_specialist_match,
+                                  not skip_provider_recommendation)
+        jobs.append((item, job))
+    for item, job in jobs:
+        answer, panel, provider_panel = job.result()
         if panel:
             if not text_already_contains(answer, panel):
                 answer += "\n\n" + panel
             actions = result.setdefault("actions", [])
             if "ask_specialist" not in actions:
                 actions.append("ask_specialist")
-        panel = provider.result() if provider else None
+        panel = provider_panel
         if panel and not provider_panel_added and not text_already_contains(answer, panel):
             answer += "\n\n" + panel
             provider_panel_added = True
@@ -373,7 +374,7 @@ Thank you for signing up and joining The Bridge community. We're thrilled to hav
 Your account is now active and ready for use.
 
 If we do not have the answer yet, you have options:
-• Ask AI: Get an instant reply from our integrated Open AI feature.
+• Ask AI: Get a reply from TheBridge AI.
 • Ask a Specialist: Connect with one of our industry specialists via email and receive a reply in your inbox. 
 • Ask an Ambassador: Get in touch with a fellow captain or crew member who will send a reply to your inbox. 
 
@@ -796,7 +797,7 @@ async def chat_attachment(
                 {
                     "role": "system",
                     "content": (
-                        "You are TheBridge AI. "
+                        IDENTITY_RULES + "If useful, end with one short contextual next-step question; otherwise omit it. "
                         "Analyse the user-provided image carefully. "
                         "Answer the user's actual question about the image. "
                         "Do not invent details that are not visible or "
@@ -830,10 +831,6 @@ async def chat_attachment(
             .message
             .content
             .strip()
-        )
-        answer = add_contextual_helpful_ending(
-            user_question,
-            answer
         )
 
         source = "chat_image_attachment"
@@ -869,7 +866,7 @@ async def chat_attachment(
                 {
                     "role": "system",
                     "content": (
-                        "You are TheBridge AI. "
+                        IDENTITY_RULES + "If useful, end with one short contextual next-step question; otherwise omit it. "
                         "Answer the user's question using the attached "
                         "document content supplied below. "
                         "Do not invent information that is not supported "
@@ -901,10 +898,6 @@ async def chat_attachment(
             .strip()
         )
 
-        answer = add_contextual_helpful_ending(
-            user_question,
-            answer
-        )
 
         source = "chat_document_attachment"
 
@@ -946,6 +939,7 @@ async def chat_attachment(
 # -------------------------
 @app.post("/chat/message")
 def chat_message(req: ChatRequest):
+    request_started = time.perf_counter()
 
     # =====================================================
     # TRACK EVERY QUESTION — USERS + GUESTS
@@ -1014,6 +1008,7 @@ def chat_message(req: ChatRequest):
                     req.user_email,
                     ans.get("partner_name")
                 )
+        print(f"CHAT TOTAL {time.perf_counter()-request_started:.2f}s")
         return result
 
     answer = result.get("answer")
@@ -1030,6 +1025,7 @@ def chat_message(req: ChatRequest):
             req.user_email,
             result.get("badge")
         )
+    print(f"CHAT TOTAL {time.perf_counter()-request_started:.2f}s")
     return {
     "answer": answer,
     "source": source,

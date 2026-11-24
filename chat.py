@@ -37,18 +37,34 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# Shared public partner metadata only. Never cache user histories or answers.
+# Shared partner knowledge and metadata used by the guest-facing route. Never cache user histories or answers.
 _METADATA_LOCK = threading.RLock()
 _METADATA_CACHE = {}
 _METADATA_TTL = 60
 _AI_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bridge-ai")
+
+_DB_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bridge-db")
+_DB_LOCAL = threading.local()
+
+def _search_rpc(name, params):
+    try:
+        if not hasattr(_DB_LOCAL, "client"):
+            _DB_LOCAL.client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        return _DB_LOCAL.client.rpc(name, params).execute().data or []
+    except Exception as e:
+        print("SEARCH RPC ERROR", name, e)
+        return []
 
 def _shared_rows(key, loader):
     with _METADATA_LOCK:
         cached = _METADATA_CACHE.get(key)
         if cached and time.monotonic() < cached[0]:
             return cached[1]
-        rows = loader() or []
+    rows = loader() or []
+    with _METADATA_LOCK:
+        if len(_METADATA_CACHE) >= 34 and key not in _METADATA_CACHE:
+            oldest = min(_METADATA_CACHE, key=lambda k: _METADATA_CACHE[k][0])
+            _METADATA_CACHE.pop(oldest, None)
         _METADATA_CACHE[key] = (time.monotonic() + _METADATA_TTL, rows)
         return rows
 
@@ -118,8 +134,16 @@ Warm regards,
 TheBridge Team
 """
 
+IDENTITY_RULES = (
+    "You are TheBridge AI, the assistant of AskTheBridge. "
+    "Identify yourself as TheBridge AI, not as ChatGPT or an underlying model. "
+    "Do not volunteer model names, providers or technical implementation details. "
+    "When explicitly asked about underlying technology, be truthful and distinguish "
+    "the product identity from the underlying technology. Do not invent claims.\n\n"
+)
+
 BASE_SYSTEM_PROMPT = (
-    "You are TheBridge AI.\n\n"
+    IDENTITY_RULES + ""
 
     "You are a continuous conversational intelligence.\n"
     "You ALWAYS use previous messages as context.\n\n"
@@ -306,7 +330,8 @@ def get_configured_provider_details(provider_name: str):
 
 def add_contextual_helpful_ending(
     question: str,
-    answer: str
+    answer: str,
+    _decision=None
 ) -> str:
     """
     Adds one short context-aware next-step question only when
@@ -322,55 +347,58 @@ def add_contextual_helpful_ending(
         return clean_answer
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Decide whether the assistant answer would genuinely "
-                        "benefit from one short useful next-step question.\n\n"
-
-                        "Do NOT add a follow-up for ordinary general conversation, "
-                        "greetings, pleasantries, casual chat, simple conversational "
-                        "remarks, or situations where no useful next action exists.\n\n"
-
-                        "A follow-up may be appropriate when the conversation is "
-                        "substantive and there is a useful next action, related task, "
-                        "comparison, procedure, practical step, further explanation, "
-                        "decision, recommendation, troubleshooting step, or related "
-                        "information the assistant can reasonably help with.\n\n"
-
-                        "The decision and wording must come entirely from the actual "
-                        "user question and assistant answer. Do not classify using "
-                        "hard-coded topic names or keyword lists.\n\n"
-
-                        "If NO follow-up should be added, return exactly:\n"
-                        "NONE\n\n"
-
-                        "If a follow-up IS useful:\n"
-                        "- Return exactly one short question.\n"
-                        "- Infer it dynamically from the actual question and answer.\n"
-                        "- Suggest the most useful logical next step.\n"
-                        "- Do not use a fixed template.\n"
-                        "- Do not repeat the same type of suggestion every time.\n"
-                        "- Do not invent facts, companies, places, products, or services.\n"
-                        "- Do not introduce an unrelated topic.\n"
-                        "- Keep it professional and lightly conversational.\n"
-                        "- Do not sound overly friendly, enthusiastic, or sales-like.\n"
-                        "- Do not rewrite or repeat the original answer."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"User question:\n{clean_question}\n\n"
-                        f"Assistant answer:\n{clean_answer}"
-                    )
-                }
-            ],
-            temperature=0.3
-        )
+        if _decision is None:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Decide whether the assistant answer would genuinely "
+                            "benefit from one short useful next-step question.\n\n"
+    
+                            "Do NOT add a follow-up for ordinary general conversation, "
+                            "greetings, pleasantries, casual chat, simple conversational "
+                            "remarks, or situations where no useful next action exists.\n\n"
+    
+                            "A follow-up may be appropriate when the conversation is "
+                            "substantive and there is a useful next action, related task, "
+                            "comparison, procedure, practical step, further explanation, "
+                            "decision, recommendation, troubleshooting step, or related "
+                            "information the assistant can reasonably help with.\n\n"
+    
+                            "The decision and wording must come entirely from the actual "
+                            "user question and assistant answer. Do not classify using "
+                            "hard-coded topic names or keyword lists.\n\n"
+    
+                            "If NO follow-up should be added, return exactly:\n"
+                            "NONE\n\n"
+    
+                            "If a follow-up IS useful:\n"
+                            "- Return exactly one short question.\n"
+                            "- Infer it dynamically from the actual question and answer.\n"
+                            "- Suggest the most useful logical next step.\n"
+                            "- Do not use a fixed template.\n"
+                            "- Do not repeat the same type of suggestion every time.\n"
+                            "- Do not invent facts, companies, places, products, or services.\n"
+                            "- Do not introduce an unrelated topic.\n"
+                            "- Keep it professional and lightly conversational.\n"
+                            "- Do not sound overly friendly, enthusiastic, or sales-like.\n"
+                            "- Do not rewrite or repeat the original answer."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"User question:\n{clean_question}\n\n"
+                            f"Assistant answer:\n{clean_answer}"
+                        )
+                    }
+                ],
+                temperature=0.3
+            )
+        else:
+            response = _decision_response(_decision)
 
         ending = (
             response
@@ -528,7 +556,7 @@ def ask_openai(question: str) -> str:
     r = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant about yachting."},
+            {"role": "system", "content": IDENTITY_RULES + "You are a helpful assistant about yachting."},
             {"role": "user", "content": question},
         ],
     )
@@ -550,7 +578,7 @@ def ask_ai_only(question: str, chat_id: int = None, history: list = None) -> str
     {
         "role": "system",
         "content": (
-            "You are TheBridge AI.\n\n"
+            IDENTITY_RULES + ""
 
             "You are a continuous conversational intelligence.\n"
             "You always use the previous assistant message as context.\n\n"
@@ -813,7 +841,7 @@ def generate_contextual_answer(question: str, context_chunks: list, history: lis
         {
             "role": "system",
             "content": (
-                "You are TheBridge AI.\n\n"
+                IDENTITY_RULES + ""
 
                 "Use the provided context to answer the question.\n\n"
 
@@ -952,7 +980,7 @@ def generate_partner_answer(question: str, partner_name: str, context: str) -> s
         {
             "role": "system",
             "content": (
-                "You are TheBridge AI.\n\n"
+                IDENTITY_RULES + ""
                 "Answer using ONLY the provided partner context.\n"
                 "Do not invent details.\n"
                 "Do not mention other partners.\n"
@@ -1036,7 +1064,7 @@ def generate_adaptive_partner_answer(question: str, partner_name: str, context_c
         {
             "role": "system",
             "content": (
-                "You are TheBridge AI.\n\n"
+                IDENTITY_RULES + ""
                 "Answer using ONLY the provided partner context.\n"
                 "Do not invent details.\n"
                 "Do not mention that you are using context.\n"
@@ -1298,7 +1326,7 @@ def choose_best_chunk_with_ai(message: str, chunks: list):
             return None
 
     # First pass: check ALL chunks in batches
-    batch_size = 20
+    batch_size = 60
     winners = []
     pending = []
 
@@ -1373,12 +1401,12 @@ def answer_from_triggered_partners(
 # 0. Best partner chunk by AI reranking
 # =====================================================
     try:
-        partner_chunks_resp = supabase_admin.table("partner_chunks") \
-            .select("id, partner_id, content") \
-            .in_("partner_id", list(partner_ids)) \
-            .execute()
-
-        partner_chunks = partner_chunks_resp.data or []
+        partner_chunks = _shared_rows(
+            ("partner_chunks", tuple(sorted(partner_ids))),
+            lambda: supabase_admin.table("partner_chunks")
+            .select("id, partner_id, content")
+            .in_("partner_id", sorted(partner_ids)).execute().data
+        )
 
         best_chunk = choose_best_chunk_with_ai(message, partner_chunks)
 
@@ -1685,7 +1713,8 @@ def is_substantive_user_question(
 
 def get_specialist_match_panel(
     question: str,
-    answer: str = ""
+    answer: str = "",
+    _decision=None
 ) -> Optional[str]:
     """
     Semantically determines whether the user's question belongs
@@ -1702,60 +1731,63 @@ def get_specialist_match_panel(
         return None
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are matching a user's issue to TheBridge's "
-                        "available human specialists.\n\n"
-
-                        "Understand the MEANING of the user's question. "
-                        "Do not perform simple keyword matching.\n\n"
-
-                        "Choose a specialist ONLY when the user's actual issue "
-                        "clearly falls within that specialist's supplied field "
-                        "and scope.\n\n"
-
-                        "Important rules:\n"
-                        "- Use only the supplied specialist catalogue.\n"
-                        "- Never invent another specialist.\n"
-                        "- Never invent another company.\n"
-                        "- Do not make a match from a vague or weak similarity.\n"
-                        "- The user does not need to use the exact terminology "
-                        "from the catalogue.\n"
-                        "- Infer the underlying issue semantically.\n"
-                        "- The answer may be used as supporting context, but the "
-                        "user's actual question is the primary signal.\n"
-                        "- If multiple specialists seem possible, select the one "
-                        "whose field most directly addresses the issue.\n"
-                        "- If there is no clear specialist match, return no match.\n\n"
-
-                        "Return ONLY valid JSON.\n\n"
-
-                        "For a clear match:\n"
-                        "{"
-                        "\"match\": true, "
-                        "\"specialist_name\": \"exact supplied specialist name\", "
-                        "\"category\": \"exact supplied category\""
-                        "}\n\n"
-
-                        "If there is no clear match:\n"
-                        "{\"match\": false}"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps({
-                        "question": clean_question,
-                        "answer": clean_answer,
-                        "specialists": SPECIALIST_MATCH_CATALOG
-                    })
-                }
-            ],
-            temperature=0
-        )
+        if _decision is None:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are matching a user's issue to TheBridge's "
+                            "available human specialists.\n\n"
+    
+                            "Understand the MEANING of the user's question. "
+                            "Do not perform simple keyword matching.\n\n"
+    
+                            "Choose a specialist ONLY when the user's actual issue "
+                            "clearly falls within that specialist's supplied field "
+                            "and scope.\n\n"
+    
+                            "Important rules:\n"
+                            "- Use only the supplied specialist catalogue.\n"
+                            "- Never invent another specialist.\n"
+                            "- Never invent another company.\n"
+                            "- Do not make a match from a vague or weak similarity.\n"
+                            "- The user does not need to use the exact terminology "
+                            "from the catalogue.\n"
+                            "- Infer the underlying issue semantically.\n"
+                            "- The answer may be used as supporting context, but the "
+                            "user's actual question is the primary signal.\n"
+                            "- If multiple specialists seem possible, select the one "
+                            "whose field most directly addresses the issue.\n"
+                            "- If there is no clear specialist match, return no match.\n\n"
+    
+                            "Return ONLY valid JSON.\n\n"
+    
+                            "For a clear match:\n"
+                            "{"
+                            "\"match\": true, "
+                            "\"specialist_name\": \"exact supplied specialist name\", "
+                            "\"category\": \"exact supplied category\""
+                            "}\n\n"
+    
+                            "If there is no clear match:\n"
+                            "{\"match\": false}"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "question": clean_question,
+                            "answer": clean_answer,
+                            "specialists": SPECIALIST_MATCH_CATALOG
+                        })
+                    }
+                ],
+                temperature=0
+            )
+        else:
+            response = _decision_response(_decision)
 
         raw = (
             response
@@ -1833,7 +1865,8 @@ def get_specialist_match_panel(
 
 def get_provider_recommendation_panel(
     question: str,
-    answer: str = ""
+    answer: str = "",
+    _decision=None
 ) -> Optional[str]:
     """
     Semantically decides whether a configured provider would be
@@ -1851,114 +1884,117 @@ def get_provider_recommendation_panel(
         return None
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You decide whether the user's CURRENT request would "
-                        "genuinely benefit from recommending one of TheBridge's "
-                        "configured service providers.\n\n"
-
-                        "Understand the MEANING and INTENT of the user's request. "
-                        "Do NOT perform keyword matching.\n\n"
-
-                        "A provider recommendation should be made ONLY when the "
-                        "provider is a clear and directly useful fit for what "
-                        "the user is actually trying to do.\n\n"
-
-                        "When a configured provider directly offers the service "
-                        "the user needs, treat that as a strong recommendation "
-                        "candidate even if the user did not explicitly ask "
-                        "for a company recommendation.\n"
-                        "For example, a user may be asking how to accomplish "
-                        "a financial, operational, technical or purchasing task "
-                        "rather than literally asking 'who do you recommend'. "
-                        "If one configured provider directly solves that actual "
-                        "need, it may still be genuinely useful to recommend it.\n\n"
-
-                        "Examples of situations where a recommendation may be "
-                        "appropriate include when the user genuinely needs a "
-                        "provider, supplier, professional service, sourcing help, "
-                        "purchasing help, a quotation, specialist commercial help, "
-                        "or a practical company they can approach to carry out "
-                        "the requirement.\n\n"
-
-                        "However, those are intent examples only. "
-                        "Do not match them as fixed phrases or keywords.\n\n"
-
-                        "STRICT RULES:\n"
-                        "- Do not recommend a provider merely because the topic "
-                        "is loosely related to its industry.\n"
-                        "- Do not recommend a provider during ordinary factual "
-                        "or educational discussion when a provider is not needed.\n"
-                        "- Do not add a commercial recommendation to every answer.\n"
-                        "- If the user is simply asking what a company, product, "
-                        "system or subject is, normally do not append a provider.\n"
-                        "- Inspect the existing assistant answer before making "
-                        "any recommendation.\n"
-                        "- If the existing answer already recommends the same "
-                        "provider, return no recommendation.\n"
-                        "- If the existing answer already identifies that provider "
-                        "as the company/provider the user should use, return no "
-                        "recommendation.\n"
-                        "- If the existing answer already contains that provider's "
-                        "website, email or other configured contact details, "
-                        "return no recommendation.\n"
-                        "- Never append a second recommendation for a provider "
-                        "that the answer already recommends.\n"
-                        "- The provider's scope must directly fit the user's "
-                        "actual requirement.\n"
-                        "- Never invent a provider.\n"
-                        "- Never invent services.\n"
-                        "- Never invent contact details.\n"
-                        "- Use only the supplied provider catalogue.\n"
-                        "- If the fit is uncertain, weak or merely adjacent, "
-                        "return no recommendation.\n\n"
-
-                        "CONTACT DETAILS:\n"
-                        "- include_contact should be true only when giving the "
-                        "website/email would be genuinely useful for the next step.\n"
-                        "- This includes situations where the user needs to "
-                        "approach, source from, enquire with, obtain services from, "
-                        "or otherwise act on the recommendation.\n"
-                        "- It may also be true when the user directly wants the "
-                        "provider's contact information.\n"
-                        "- For a recommendation where contact details add no "
-                        "practical value, it may be false.\n\n"
-
-                        "Return ONLY valid JSON.\n\n"
-
-                        "For a clear provider recommendation:\n"
-                        "{"
-                        "\"match\": true, "
-                        "\"provider_name\": \"exact supplied provider name\", "
-                        "\"include_contact\": true"
-                        "}\n\n"
-
-                        "or:\n"
-                        "{"
-                        "\"match\": true, "
-                        "\"provider_name\": \"exact supplied provider name\", "
-                        "\"include_contact\": false"
-                        "}\n\n"
-
-                        "If no provider should be recommended:\n"
-                        "{\"match\": false}"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps({
-                        "question": clean_question,
-                        "current_answer": clean_answer,
-                        "providers": PROVIDER_RECOMMENDATION_CATALOG
-                    })
-                }
-            ],
-            temperature=0
-        )
+        if _decision is None:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You decide whether the user's CURRENT request would "
+                            "genuinely benefit from recommending one of TheBridge's "
+                            "configured service providers.\n\n"
+    
+                            "Understand the MEANING and INTENT of the user's request. "
+                            "Do NOT perform keyword matching.\n\n"
+    
+                            "A provider recommendation should be made ONLY when the "
+                            "provider is a clear and directly useful fit for what "
+                            "the user is actually trying to do.\n\n"
+    
+                            "When a configured provider directly offers the service "
+                            "the user needs, treat that as a strong recommendation "
+                            "candidate even if the user did not explicitly ask "
+                            "for a company recommendation.\n"
+                            "For example, a user may be asking how to accomplish "
+                            "a financial, operational, technical or purchasing task "
+                            "rather than literally asking 'who do you recommend'. "
+                            "If one configured provider directly solves that actual "
+                            "need, it may still be genuinely useful to recommend it.\n\n"
+    
+                            "Examples of situations where a recommendation may be "
+                            "appropriate include when the user genuinely needs a "
+                            "provider, supplier, professional service, sourcing help, "
+                            "purchasing help, a quotation, specialist commercial help, "
+                            "or a practical company they can approach to carry out "
+                            "the requirement.\n\n"
+    
+                            "However, those are intent examples only. "
+                            "Do not match them as fixed phrases or keywords.\n\n"
+    
+                            "STRICT RULES:\n"
+                            "- Do not recommend a provider merely because the topic "
+                            "is loosely related to its industry.\n"
+                            "- Do not recommend a provider during ordinary factual "
+                            "or educational discussion when a provider is not needed.\n"
+                            "- Do not add a commercial recommendation to every answer.\n"
+                            "- If the user is simply asking what a company, product, "
+                            "system or subject is, normally do not append a provider.\n"
+                            "- Inspect the existing assistant answer before making "
+                            "any recommendation.\n"
+                            "- If the existing answer already recommends the same "
+                            "provider, return no recommendation.\n"
+                            "- If the existing answer already identifies that provider "
+                            "as the company/provider the user should use, return no "
+                            "recommendation.\n"
+                            "- If the existing answer already contains that provider's "
+                            "website, email or other configured contact details, "
+                            "return no recommendation.\n"
+                            "- Never append a second recommendation for a provider "
+                            "that the answer already recommends.\n"
+                            "- The provider's scope must directly fit the user's "
+                            "actual requirement.\n"
+                            "- Never invent a provider.\n"
+                            "- Never invent services.\n"
+                            "- Never invent contact details.\n"
+                            "- Use only the supplied provider catalogue.\n"
+                            "- If the fit is uncertain, weak or merely adjacent, "
+                            "return no recommendation.\n\n"
+    
+                            "CONTACT DETAILS:\n"
+                            "- include_contact should be true only when giving the "
+                            "website/email would be genuinely useful for the next step.\n"
+                            "- This includes situations where the user needs to "
+                            "approach, source from, enquire with, obtain services from, "
+                            "or otherwise act on the recommendation.\n"
+                            "- It may also be true when the user directly wants the "
+                            "provider's contact information.\n"
+                            "- For a recommendation where contact details add no "
+                            "practical value, it may be false.\n\n"
+    
+                            "Return ONLY valid JSON.\n\n"
+    
+                            "For a clear provider recommendation:\n"
+                            "{"
+                            "\"match\": true, "
+                            "\"provider_name\": \"exact supplied provider name\", "
+                            "\"include_contact\": true"
+                            "}\n\n"
+    
+                            "or:\n"
+                            "{"
+                            "\"match\": true, "
+                            "\"provider_name\": \"exact supplied provider name\", "
+                            "\"include_contact\": false"
+                            "}\n\n"
+    
+                            "If no provider should be recommended:\n"
+                            "{\"match\": false}"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "question": clean_question,
+                            "current_answer": clean_answer,
+                            "providers": PROVIDER_RECOMMENDATION_CATALOG
+                        })
+                    }
+                ],
+                temperature=0
+            )
+        else:
+            response = _decision_response(_decision)
 
         raw = (
             response
@@ -2162,6 +2198,55 @@ def get_provider_comparison_panel(
 
     return None
 
+
+# Reuse the original finishing validators with one combined model response.
+def _decision_response(value):
+    from types import SimpleNamespace
+    raw = value if isinstance(value, str) else json.dumps(value)
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=raw))])
+
+_FINISH_RULES = ['Decide whether the assistant answer would genuinely benefit from one short useful next-step question.\n\nDo NOT add a follow-up for ordinary general conversation, greetings, pleasantries, casual chat, simple conversational remarks, or situations where no useful next action exists.\n\nA follow-up may be appropriate when the conversation is substantive and there is a useful next action, related task, comparison, procedure, practical step, further explanation, decision, recommendation, troubleshooting step, or related information the assistant can reasonably help with.\n\nThe decision and wording must come entirely from the actual user question and assistant answer. Do not classify using hard-coded topic names or keyword lists.\n\nIf NO follow-up should be added, return exactly:\nNONE\n\nIf a follow-up IS useful:\n- Return exactly one short question.\n- Infer it dynamically from the actual question and answer.\n- Suggest the most useful logical next step.\n- Do not use a fixed template.\n- Do not repeat the same type of suggestion every time.\n- Do not invent facts, companies, places, products, or services.\n- Do not introduce an unrelated topic.\n- Keep it professional and lightly conversational.\n- Do not sound overly friendly, enthusiastic, or sales-like.\n- Do not rewrite or repeat the original answer.', 'You are matching a user\'s issue to TheBridge\'s available human specialists.\n\nUnderstand the MEANING of the user\'s question. Do not perform simple keyword matching.\n\nChoose a specialist ONLY when the user\'s actual issue clearly falls within that specialist\'s supplied field and scope.\n\nImportant rules:\n- Use only the supplied specialist catalogue.\n- Never invent another specialist.\n- Never invent another company.\n- Do not make a match from a vague or weak similarity.\n- The user does not need to use the exact terminology from the catalogue.\n- Infer the underlying issue semantically.\n- The answer may be used as supporting context, but the user\'s actual question is the primary signal.\n- If multiple specialists seem possible, select the one whose field most directly addresses the issue.\n- If there is no clear specialist match, return no match.\n\nReturn ONLY valid JSON.\n\nFor a clear match:\n{"match": true, "specialist_name": "exact supplied specialist name", "category": "exact supplied category"}\n\nIf there is no clear match:\n{"match": false}', 'You decide whether the user\'s CURRENT request would genuinely benefit from recommending one of TheBridge\'s configured service providers.\n\nUnderstand the MEANING and INTENT of the user\'s request. Do NOT perform keyword matching.\n\nA provider recommendation should be made ONLY when the provider is a clear and directly useful fit for what the user is actually trying to do.\n\nWhen a configured provider directly offers the service the user needs, treat that as a strong recommendation candidate even if the user did not explicitly ask for a company recommendation.\nFor example, a user may be asking how to accomplish a financial, operational, technical or purchasing task rather than literally asking \'who do you recommend\'. If one configured provider directly solves that actual need, it may still be genuinely useful to recommend it.\n\nExamples of situations where a recommendation may be appropriate include when the user genuinely needs a provider, supplier, professional service, sourcing help, purchasing help, a quotation, specialist commercial help, or a practical company they can approach to carry out the requirement.\n\nHowever, those are intent examples only. Do not match them as fixed phrases or keywords.\n\nSTRICT RULES:\n- Do not recommend a provider merely because the topic is loosely related to its industry.\n- Do not recommend a provider during ordinary factual or educational discussion when a provider is not needed.\n- Do not add a commercial recommendation to every answer.\n- If the user is simply asking what a company, product, system or subject is, normally do not append a provider.\n- Inspect the existing assistant answer before making any recommendation.\n- If the existing answer already recommends the same provider, return no recommendation.\n- If the existing answer already identifies that provider as the company/provider the user should use, return no recommendation.\n- If the existing answer already contains that provider\'s website, email or other configured contact details, return no recommendation.\n- Never append a second recommendation for a provider that the answer already recommends.\n- The provider\'s scope must directly fit the user\'s actual requirement.\n- Never invent a provider.\n- Never invent services.\n- Never invent contact details.\n- Use only the supplied provider catalogue.\n- If the fit is uncertain, weak or merely adjacent, return no recommendation.\n\nCONTACT DETAILS:\n- include_contact should be true only when giving the website/email would be genuinely useful for the next step.\n- This includes situations where the user needs to approach, source from, enquire with, obtain services from, or otherwise act on the recommendation.\n- It may also be true when the user directly wants the provider\'s contact information.\n- For a recommendation where contact details add no practical value, it may be false.\n\nReturn ONLY valid JSON.\n\nFor a clear provider recommendation:\n{"match": true, "provider_name": "exact supplied provider name", "include_contact": true}\n\nor:\n{"match": true, "provider_name": "exact supplied provider name", "include_contact": false}\n\nIf no provider should be recommended:\n{"match": false}']
+
+def combined_answer_finishing(question, answer, ending=True, specialist=True, provider=True):
+    if not (ending or specialist or provider):
+        return answer, None, None
+    try:
+        rules = {key: rule for key, rule, enabled in zip(
+            ("ending", "specialist", "provider"), _FINISH_RULES,
+            (ending, specialist, provider)) if enabled}
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", temperature=0,
+            response_format={"type": "json_object"},
+            messages=[{"role": "system", "content": IDENTITY_RULES +
+                "Perform each enabled task independently. Return one JSON object with keys "
+                "ending (string, NONE if absent), specialist (object), provider (object). "
+                "Apply each task's rules to the original answer; do not rewrite it. "
+                "For disabled tasks return NONE or {\"match\": false}. Task rules: " + json.dumps(rules)},
+                {"role": "user", "content": json.dumps({"question": question,
+                    "answer": answer, "current_answer": answer,
+                    "specialists": SPECIALIST_MATCH_CATALOG if specialist else [],
+                    "providers": PROVIDER_RECOMMENDATION_CATALOG if provider else []})}])
+        data = json.loads(response.choices[0].message.content)
+        ending_value = data.get("ending")
+        specialist_value = data.get("specialist")
+        provider_value = data.get("provider")
+        if not isinstance(ending_value, str): ending_value = "NONE"
+        if not isinstance(specialist_value, dict): specialist_value = {"match": False}
+        if not isinstance(provider_value, dict): provider_value = {"match": False}
+        return (
+            add_contextual_helpful_ending(question, answer, _decision=ending_value) if ending else answer,
+            get_specialist_match_panel(question, answer, _decision=specialist_value) if specialist else None,
+            get_provider_recommendation_panel(question, answer, _decision=provider_value) if provider else None,
+        )
+    except Exception as e:
+        print("COMBINED FINISH ERROR:", e)
+        # Preserve functionality if combined JSON request fails.
+        tasks = [(_AI_POOL.submit(fn, question, answer) if enabled else None)
+                 for fn, enabled in zip((add_contextual_helpful_ending,
+                     get_specialist_match_panel, get_provider_recommendation_panel),
+                     (ending, specialist, provider))]
+        return tuple(t.result() if t else default for t, default in zip(tasks, (answer, None, None)))
+
 def get_answer(message: str, user_role: str = "guest", chat_id: int = None, history: list = None):
 
     user_norm = normalize(message)
@@ -2198,7 +2283,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                     {
                         "role": "system",
                         "content": (
-                            "Continue the previous answer using ONLY the same topic and context. "
+                            IDENTITY_RULES + "Continue the previous answer using ONLY the same topic and context. "
                             "Do not introduce new entities or guess unrelated meanings."
                         )
                     },
@@ -2275,19 +2360,35 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
         if result:
             return result
+    search_jobs = {}
+    if embedding:
+        search_jobs['qa_results'] = _DB_POOL.submit(_search_rpc, 'match_partner_qa', {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.45,  # slightly lower for better trigger
+                    "match_count": 5
+                })
+        search_jobs['bridge_qa'] = _DB_POOL.submit(_search_rpc, 'match_bridge_qa', {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.65,
+                    "match_count": 5
+                })
+        search_jobs['semantic_results'] = _DB_POOL.submit(_search_rpc, 'match_partner_chunks', {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.30,
+                    "match_count": 40
+                })
+        search_jobs['bridge_results'] = _DB_POOL.submit(_search_rpc, 'match_bridge_chunks', {
+                    "query_embedding": embedding,
+                    "match_threshold": 0.55,
+                    "match_count": 8
+                })
+
     # =====================================================
     # 3️⃣ PARTNER QA (FIRST PRIORITY)
     # =====================================================
     if embedding:
         try:
-            qa_results = supabase_admin.rpc(
-                "match_partner_qa",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.45,  # slightly lower for better trigger
-                    "match_count": 5
-                }
-            ).execute().data
+            qa_results = search_jobs["qa_results"].result()
         except Exception as e:
             print("PARTNER QA ERROR:", e)
             qa_results = []
@@ -2322,14 +2423,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
     if embedding:
         try:
-            bridge_qa = supabase_admin.rpc(
-                "match_bridge_qa",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.65,
-                    "match_count": 5
-                }
-            ).execute().data
+            bridge_qa = search_jobs["bridge_qa"].result()
         except Exception as e:
             print("BRIDGE QA ERROR:", e)
             bridge_qa = []
@@ -2357,14 +2451,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 # =====================================================
     if embedding:
         try:
-            semantic_results = supabase_admin.rpc(
-                "match_partner_chunks",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.30,
-                    "match_count": 40
-                }
-            ).execute().data
+            semantic_results = search_jobs["semantic_results"].result()
         except Exception as e:
             print("PARTNER DOC ERROR:", e)
             semantic_results = []
@@ -2425,14 +2512,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
     if embedding:
         try:
-            bridge_results = supabase_admin.rpc(
-                "match_bridge_chunks",
-                {
-                    "query_embedding": embedding,
-                    "match_threshold": 0.55,
-                    "match_count": 8
-                }
-            ).execute().data
+            bridge_results = search_jobs["bridge_results"].result()
         except Exception as e:
             print("BRIDGE DOC ERROR:", e)
             bridge_results = []
