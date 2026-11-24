@@ -15,6 +15,10 @@ from chat import (
 )
 from supabase import create_client
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+_FINISH_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bridge-finish")
 from dotenv import load_dotenv, find_dotenv
 import secrets
 import requests
@@ -116,195 +120,42 @@ def finish_chat_result(question: str, result: dict) -> dict:
         "openai_only",
     }
 
-    # =====================================================
-    # MULTI-ANSWER RESULT
-    # =====================================================
-
     answers = result.get("answers")
-
-    if isinstance(answers, list):
-
-        provider_panel_added = False
-        comparison_panel_added = False
-
-        for item in answers:
-
-            if not isinstance(item, dict):
-                continue
-
-            answer_text = str(
-                item.get("answer") or ""
-            ).strip()
-
-            if not answer_text:
-                continue
-
-            # ---------------------------------------------
-            # EXISTING CONTEXTUAL ENDING
-            # ---------------------------------------------
-
-            if not skip_helpful_ending:
-                answer_text = add_contextual_helpful_ending(
-                    question,
-                    answer_text
-                )
-
-            # ---------------------------------------------
-            # SPECIALIST MATCH PANEL
-            # ---------------------------------------------
-
-            if not skip_specialist_match:
-
-                specialist_panel = get_specialist_match_panel(
-                    question,
-                    answer_text
-                )
-
-                if specialist_panel:
-
-                    if not text_already_contains(
-                        answer_text,
-                        specialist_panel
-                    ):
-                        answer_text = (
-                            f"{answer_text}\n\n"
-                            f"{specialist_panel}"
-                        )
-
-                    actions = result.setdefault(
-                        "actions",
-                        []
-                    )
-
-                    if "ask_specialist" not in actions:
-                        actions.append(
-                            "ask_specialist"
-                        )
-
-            if (
-                not skip_provider_recommendation
-                and not provider_panel_added
-            ):
-
-                provider_panel = get_provider_recommendation_panel(
-                    question,
-                    answer_text
-                )
-
-                if provider_panel:
-                    answer_text = (
-                        f"{answer_text}\n\n"
-                        f"{provider_panel}"
-                    )
-
-                    provider_panel_added = True
-
-            if (
-                not skip_provider_comparison
-                and not comparison_panel_added
-            ):
-
-                comparison_panel = get_provider_comparison_panel(
-                    question,
-                    answer_text
-                )
-
-                if comparison_panel:
-                    answer_text = (
-                        f"{answer_text}\n\n"
-                        f"{comparison_panel}"
-                    )
-
-                    comparison_panel_added = True
-
-            item["answer"] = answer_text
-
-        return result
-
-    # =====================================================
-    # SINGLE ANSWER RESULT
-    # =====================================================
-
-    answer_text = str(
-        result.get("answer") or ""
-    ).strip()
-
-    if not answer_text:
-        return result
-
-    # -----------------------------------------------------
-    # EXISTING CONTEXTUAL ENDING
-    # -----------------------------------------------------
-
-    if not skip_helpful_ending:
-        answer_text = add_contextual_helpful_ending(
-            question,
-            answer_text
-        )
-
-    # -----------------------------------------------------
-    # SPECIALIST MATCH PANEL
-    # -----------------------------------------------------
-
-    if not skip_specialist_match:
-
-        specialist_panel = get_specialist_match_panel(
-            question,
-            answer_text
-        )
-
-        if specialist_panel:
-
-            if not text_already_contains(
-                answer_text,
-                specialist_panel
-            ):
-                answer_text = (
-                    f"{answer_text}\n\n"
-                    f"{specialist_panel}"
-                )
-
-            actions = result.setdefault(
-                "actions",
-                []
-            )
-
+    items = answers if isinstance(answers, list) else [result]
+    provider_panel_added = False
+    comparison_panel_added = False
+    jobs = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        answer = str(item.get("answer") or "").strip()
+        if not answer:
+            continue
+        ending = None if skip_helpful_ending else _FINISH_POOL.submit(add_contextual_helpful_ending, question, answer)
+        specialist = None if skip_specialist_match else _FINISH_POOL.submit(get_specialist_match_panel, question, answer)
+        provider = None if skip_provider_recommendation else _FINISH_POOL.submit(get_provider_recommendation_panel, question, answer)
+        jobs.append((item, answer, ending, specialist, provider))
+    for item, original, ending, specialist, provider in jobs:
+        answer = ending.result() if ending else original
+        panel = specialist.result() if specialist else None
+        if panel:
+            if not text_already_contains(answer, panel):
+                answer += "\n\n" + panel
+            actions = result.setdefault("actions", [])
             if "ask_specialist" not in actions:
-                actions.append(
-                    "ask_specialist"
-                )
-
-    if not skip_provider_recommendation:
-
-        provider_panel = get_provider_recommendation_panel(
-            question,
-            answer_text
-        )
-
-        if provider_panel:
-            answer_text = (
-                f"{answer_text}\n\n"
-                f"{provider_panel}"
-            )
-
-
-    if not skip_provider_comparison:
-
-        comparison_panel = get_provider_comparison_panel(
-            question,
-            answer_text
-        )
-
-        if comparison_panel:
-            answer_text = (
-                f"{answer_text}\n\n"
-                f"{comparison_panel}"
-            )
-
-    result["answer"] = answer_text
-
+                actions.append("ask_specialist")
+        panel = provider.result() if provider else None
+        if panel and not provider_panel_added and not text_already_contains(answer, panel):
+            answer += "\n\n" + panel
+            provider_panel_added = True
+        if not skip_provider_comparison and not comparison_panel_added:
+            panel = get_provider_comparison_panel(question, answer)
+            if panel:
+                answer += "\n\n" + panel
+                comparison_panel_added = True
+        item["answer"] = answer
     return result
-    
+
 # -------------------------
 # ENV
 # -------------------------
@@ -1127,6 +978,7 @@ def chat_message(req: ChatRequest):
         )
 
     try:
+        started = time.perf_counter()
         result = get_answer(
             req.message,
             req.user_role,
@@ -1134,10 +986,12 @@ def chat_message(req: ChatRequest):
             req.history
         )
 
+        retrieved = time.perf_counter()
         result = finish_chat_result(
             req.message,
             result
         )
+        print(f"CHAT TIMING retrieval={retrieved-started:.2f}s finishing={time.perf_counter()-retrieved:.2f}s source={result.get('source')}")
 
     except Exception as e:
         print("AI ERROR:", e)

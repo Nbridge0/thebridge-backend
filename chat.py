@@ -1,4 +1,7 @@
 import os
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import random
 import string
 import secrets
@@ -33,6 +36,30 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # -------------------------------
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+# Shared public partner metadata only. Never cache user histories or answers.
+_METADATA_LOCK = threading.RLock()
+_METADATA_CACHE = {}
+_METADATA_TTL = 60
+_AI_POOL = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bridge-ai")
+
+def _shared_rows(key, loader):
+    with _METADATA_LOCK:
+        cached = _METADATA_CACHE.get(key)
+        if cached and time.monotonic() < cached[0]:
+            return cached[1]
+        rows = loader() or []
+        _METADATA_CACHE[key] = (time.monotonic() + _METADATA_TTL, rows)
+        return rows
+
+def _partner_rows():
+    return _shared_rows("partners", lambda: supabase_admin.table("partners")
+                        .select("id, badge_label").execute().data)
+
+def _trigger_rows():
+    return _shared_rows("triggers", lambda: supabase_admin.table("partner_triggers")
+                        .select("partner_id, trigger, partners(id, badge_label)")
+                        .eq("is_active", True).execute().data)
 
 def get_user_name_by_email(email: str) -> str:
     try:
@@ -588,7 +615,8 @@ def get_chat_history(chat_id: int, limit: int = 15):
         resp = supabase_admin.table("chat_messages") \
             .select("role, content") \
             .eq("chat_id", chat_id) \
-            .order("id") \
+            .order("id", desc=True) \
+            .limit(20) \
             .execute()
 
         if not resp.data:
@@ -596,7 +624,7 @@ def get_chat_history(chat_id: int, limit: int = 15):
 
         history = []
 
-        for msg in resp.data:
+        for msg in reversed(resp.data):
             if msg["role"] in ["user", "assistant"]:
                 history.append({
                     "role": msg["role"],
@@ -841,12 +869,7 @@ def get_partner_trigger_matches(message: str):
     try:
         msg = normalize(message)
 
-        resp = supabase_admin.table("partner_triggers") \
-            .select("partner_id, trigger, partners(id, badge_label)") \
-            .eq("is_active", True) \
-            .execute()
-
-        rows = resp.data or []
+        rows = _trigger_rows()
         matches = []
 
         for row in rows:
@@ -897,13 +920,9 @@ def get_partner_name_match(message: str):
         msg = normalize(message)
         msg_compact = msg.replace(" ", "")
 
-        resp = supabase_admin.table("partners") \
-            .select("id, badge_label") \
-            .execute()
-
         matches = []
 
-        for partner in resp.data or []:
+        for partner in _partner_rows():
             partner_name = partner.get("badge_label") or ""
             partner_norm = normalize(partner_name)
             partner_compact = partner_norm.replace(" ", "")
@@ -1281,6 +1300,7 @@ def choose_best_chunk_with_ai(message: str, chunks: list):
     # First pass: check ALL chunks in batches
     batch_size = 20
     winners = []
+    pending = []
 
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start:start + batch_size]
@@ -1294,13 +1314,18 @@ def choose_best_chunk_with_ai(message: str, chunks: list):
                 "content": (chunk.get("content") or "")[:1500]
             })
 
-        picked = pick_from_candidates(candidates)
+        pending.append(_AI_POOL.submit(pick_from_candidates, candidates))
 
+    for future in pending:
+        picked = future.result()
         if picked is not None:
             winners.append(picked)
 
     if not winners:
         return None
+
+    if len(winners) == 1:
+        return chunks[winners[0]["global_index"]]
 
     # Second pass: choose best winner from all batch winners
     final_candidates = []
@@ -2149,13 +2174,10 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     else:
         history = get_chat_history(chat_id)
 
-    print("HISTORY DEBUG:", history)
+    # /chat/message has already saved this turn. Do not send it twice.
+    if history and history[-1].get("role") == "user" and history[-1].get("content") == message:
+        history = history[:-1]
     answer_found = False
-
-        # Generic context-aware retrieval question
-    retrieval_question = rewrite_followup_question(message, history)
-
-    print("RETRIEVAL QUESTION DEBUG:", retrieval_question)
 
     # =====================================================
 # 🔥 CONTEXT CONTINUATION
@@ -2203,6 +2225,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
     # =====================================================
     # 2️⃣ EMBEDDING
     # =====================================================
+    retrieval_question = rewrite_followup_question(message, history)
     try:
         cleaned_question = normalize_question_for_search(
             enrich_question(retrieval_question)
@@ -2278,13 +2301,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 
             row = qa_results[0]
             try:
-                partner = supabase_admin.table("partners") \
-                    .select("badge_label") \
-                    .eq("id", row["partner_id"]) \
-                    .single() \
-                    .execute()
-
-                partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                partner_name = next((p.get("badge_label") or "Partner" for p in _partner_rows() if str(p.get("id")) == str(row["partner_id"])), "Partner")
             except Exception as e:
                 print("PARTNER FETCH ERROR:", e)
                 partner_name = "Partner"
@@ -2376,13 +2393,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
                 best_partner_id = best_chunk["partner_id"]
 
                 try:
-                    partner = supabase_admin.table("partners") \
-                        .select("badge_label") \
-                        .eq("id", best_partner_id) \
-                        .single() \
-                        .execute()
-
-                    partner_name = partner.data["badge_label"] if partner.data else "Partner"
+                    partner_name = next((p.get("badge_label") or "Partner" for p in _partner_rows() if str(p.get("id")) == str(best_partner_id)), "Partner")
                 except Exception as e:
                     print("PARTNER FETCH ERROR:", e)
                     partner_name = "Partner"
@@ -2467,10 +2478,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 # 7B. NOTHING VERIFIED FOUND
 # =====================================================
 
-    substantive_question = is_substantive_user_question(
-        message,
-        history
-    )
+    substantive_future = _AI_POOL.submit(is_substantive_user_question, message, history)
 
     messages = [
         {
@@ -2523,7 +2531,7 @@ def get_answer(message: str, user_role: str = "guest", chat_id: int = None, hist
 # no verified TheBridge/partner answer was found
 # =====================================================
 
-    if substantive_question:
+    if substantive_future.result():
 
         answer = (
             "Oops, we don’t have the answer, "
